@@ -19,7 +19,7 @@ You need Rust 1.88 or later (CI pins 1.99.1) and a C compiler. Everything except
 cargo test --workspace --all-features --locked
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 # vendor/ is upstream code and isn't formatted; check only this repository's packages:
-for p in ictl-device ictl-wda ictl-sign ictl-unlock ictl-daemon ictl-mcp ictl-protocol iphone-control; do cargo fmt -p $p -- --check; done
+for p in ictl-l10n ictl-device ictl-wda ictl-sign ictl-unlock ictl-daemon ictl-mcp ictl-protocol iphone-control; do cargo fmt -p $p -- --check; done
 ```
 
 Or, without Rust installed:

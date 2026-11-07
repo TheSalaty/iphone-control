@@ -1952,6 +1952,7 @@ dependencies = [
  "anyhow",
  "base64 0.23.1",
  "ictl-device",
+ "ictl-l10n",
  "ictl-protocol",
  "ictl-sign",
  "ictl-unlock",
@@ -1969,6 +1970,7 @@ dependencies = [
 name = "ictl-device"
 version = "0.1.4"
 dependencies = [
+ "ictl-l10n",
  "idevice",
  "plist",
  "reqwest 0.13.5",
@@ -1980,10 +1982,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ictl-l10n"
+version = "0.1.4"
+dependencies = [
+ "tokio",
+]
+
+[[package]]
 name = "ictl-mcp"
 version = "0.1.4"
 dependencies = [
  "anyhow",
+ "ictl-l10n",
  "ictl-protocol",
  "rmcp",
  "serde_json",
@@ -1994,6 +2004,7 @@ dependencies = [
 name = "ictl-protocol"
 version = "0.1.4"
 dependencies = [
+ "ictl-l10n",
  "libc",
  "serde",
  "serde_json",
@@ -2004,6 +2015,7 @@ dependencies = [
 name = "ictl-sign"
 version = "0.1.4"
 dependencies = [
+ "ictl-l10n",
  "plist",
  "plume_core",
  "plume_store",
@@ -2017,6 +2029,7 @@ dependencies = [
 name = "ictl-unlock"
 version = "0.1.4"
 dependencies = [
+ "ictl-l10n",
  "ictl-wda",
  "serde_json",
  "thiserror 2.0.21",
@@ -2031,6 +2044,7 @@ version = "0.1.4"
 dependencies = [
  "base64 0.23.1",
  "ictl-device",
+ "ictl-l10n",
  "idevice",
  "quick-xml",
  "regex",
@@ -2244,6 +2258,7 @@ dependencies = [
  "clap",
  "ictl-daemon",
  "ictl-device",
+ "ictl-l10n",
  "ictl-mcp",
  "ictl-sign",
  "ictl-wda",

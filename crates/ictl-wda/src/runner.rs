@@ -59,8 +59,9 @@ fn automation_signal(msg: &str) -> Option<AutomationSignal> {
 /// 点「信任」之前这样报，之后下一次就能启动），在报错里提示一句
 fn launch_hint(msg: String) -> String {
     if msg.contains("unexpected response") {
-        format!(
-            "{msg}(如果是第一次在这台手机上装 WDA:到 设置 → 通用 → VPN 与设备管理 里信任你的 Apple ID 开发者,需要联网)"
+        ictl_l10n::trf!(
+            "{msg}(如果是第一次在这台手机上装 WDA:到 设置 → 通用 → VPN 与设备管理 里信任你的 Apple ID 开发者,需要联网)",
+            "{msg} (if this is the first WDA install on this phone: trust your Apple ID developer under Settings → General → VPN & Device Management, which needs internet)"
         )
     } else {
         msg
@@ -104,7 +105,7 @@ impl XCUITestListener for ErrorListener {
     }
 
     async fn did_begin_initializing_for_ui_testing(&mut self) -> std::result::Result<(), IdeviceError> {
-        tracing::debug!("xctest: 开始初始化 UI 测试");
+        tracing::debug!("{}", ictl_l10n::tr!("xctest: 开始初始化 UI 测试", "xctest: initializing the UI test"));
         Ok(())
     }
 
@@ -119,7 +120,7 @@ impl XCUITestListener for ErrorListener {
     }
 
     async fn did_begin_executing_test_plan(&mut self) -> std::result::Result<(), IdeviceError> {
-        tracing::debug!("xctest: 开始执行测试计划");
+        tracing::debug!("{}", ictl_l10n::tr!("xctest: 开始执行测试计划", "xctest: running the test plan"));
         self.0.lock().unwrap().plan_started = true;
         Ok(())
     }
@@ -157,9 +158,13 @@ impl WdaRunner {
                 other => WdaError::StartFailed(other.to_string()),
             })
         };
-        let cfg = tokio::time::timeout(LOOKUP_TIMEOUT, lookup)
-            .await
-            .map_err(|_| WdaError::StartFailed(format!("查 WDA 安装信息超时（{} 秒）", LOOKUP_TIMEOUT.as_secs())))??;
+        let cfg = tokio::time::timeout(LOOKUP_TIMEOUT, lookup).await.map_err(|_| {
+            WdaError::StartFailed(ictl_l10n::trf!(
+                "查 WDA 安装信息超时（{} 秒）",
+                "querying the WDA install info timed out ({} s)",
+                LOOKUP_TIMEOUT.as_secs()
+            ))
+        })??;
 
         let progress = Arc::new(Mutex::new(Progress::default()));
         let task = {
@@ -194,13 +199,19 @@ impl WdaRunner {
                 deadline = deadline.max(since + AUTOMATION_WAIT);
                 if !announced {
                     announced = true;
-                    tracing::info!("runner 在等手机上的「Enable UI Automation」密码");
+                    tracing::info!(
+                        "{}",
+                        ictl_l10n::tr!(
+                            "runner 在等手机上的「Enable UI Automation」密码",
+                            "the runner is waiting for the “Enable UI Automation” passcode on the phone"
+                        )
+                    );
                 }
             }
             if runner.task.is_finished() {
                 let r = (&mut runner.task).await;
                 let msg = match r {
-                    Ok(Ok(())) => "runner 提前结束".to_owned(),
+                    Ok(Ok(())) => ictl_l10n::tr!("runner 提前结束", "the runner ended early").to_owned(),
                     Ok(Err(e)) => e.to_string(),
                     Err(e) => e.to_string(),
                 };
@@ -210,8 +221,12 @@ impl WdaRunner {
             if !plan_started && t0.elapsed() >= PLAN_START_FALLBACK && !fallback_logged {
                 fallback_logged = true;
                 tracing::info!(
-                    "{} 秒内没收到 runner 开始执行测试计划的回调，改为直接查 /status",
-                    PLAN_START_FALLBACK.as_secs()
+                    "{}",
+                    ictl_l10n::trf!(
+                        "{} 秒内没收到 runner 开始执行测试计划的回调，改为直接查 /status",
+                        "No callback that the runner started the test plan within {} seconds; querying /status directly",
+                        PLAN_START_FALLBACK.as_secs()
+                    )
                 );
             }
             if (plan_started || fallback_logged) && client.ready().await.unwrap_or(false) {
@@ -219,7 +234,9 @@ impl WdaRunner {
             }
             if tokio::time::Instant::now() >= deadline {
                 runner.task.abort();
-                return Err(failure(Some("WDA 在限定时间内没有就绪".to_owned())));
+                return Err(failure(Some(
+                    ictl_l10n::tr!("WDA 在限定时间内没有就绪", "WDA didn't become ready in time").to_owned(),
+                )));
             }
             tokio::time::sleep(Duration::from_millis(500)).await;
         }

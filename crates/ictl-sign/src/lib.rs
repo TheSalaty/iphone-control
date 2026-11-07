@@ -24,17 +24,17 @@ pub use profile::Profile;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SignError {
-    #[error("还没有登录 Apple ID：运行 iphone-control login")]
+    #[error("{}", ictl_l10n::tr!("还没有登录 Apple ID：运行 iphone-control login", "Not signed in to an Apple ID yet: run iphone-control login"))]
     NotLoggedIn,
-    #[error("Apple ID 会话已失效，需要重新登录（iphone-control login）：{0}")]
+    #[error("{}", ictl_l10n::trf!("Apple ID 会话已失效，需要重新登录（iphone-control login）：{0}", "The Apple ID session expired; sign in again (iphone-control login): {0}", .0))]
     SessionInvalid(String),
-    #[error("账号下没有可用的开发团队")]
+    #[error("{}", ictl_l10n::tr!("账号下没有可用的开发团队", "The account has no usable development team"))]
     NoTeam,
-    #[error("签名失败：{0}")]
+    #[error("{}", ictl_l10n::trf!("签名失败：{0}", "Signing failed: {0}", .0))]
     Codesign(String),
-    #[error("开发者服务：{0}")]
+    #[error("{}", ictl_l10n::trf!("开发者服务：{0}", "Developer services: {0}", .0))]
     Developer(String),
-    #[error("签名结果检查不通过：{0}")]
+    #[error("{}", ictl_l10n::trf!("签名结果检查不通过：{0}", "The signed result failed verification: {0}", .0))]
     Verify(String),
     #[error("{0}")]
     Io(#[from] std::io::Error),
@@ -152,8 +152,15 @@ impl Session {
     async fn sign_in(&self, work: &Path, input: &Path, output: &Path, udid: &str) -> Result<Signed> {
         let app = ipa::unpack(input, work)?;
         let bundles = bundle::collect_sorted(&app)?;
-        let main = bundles.last().cloned().ok_or_else(|| SignError::Codesign("空的 .app".into()))?;
-        let orig = main.identifier().ok_or_else(|| SignError::Codesign("主程序没有 CFBundleIdentifier".into()))?;
+        let main = bundles
+            .last()
+            .cloned()
+            .ok_or_else(|| SignError::Codesign(ictl_l10n::tr!("空的 .app", "empty .app").into()))?;
+        let orig = main.identifier().ok_or_else(|| {
+            SignError::Codesign(
+                ictl_l10n::tr!("主程序没有 CFBundleIdentifier", "the main executable has no CFBundleIdentifier").into(),
+            )
+        })?;
         let team = &self.team_id;
         let new_id = if orig.ends_with(&format!(".{team}")) { orig.clone() } else { format!("{orig}.{team}") };
 
@@ -169,11 +176,12 @@ impl Session {
             b.set_identifier(&id)?;
             let name = b.name().unwrap_or_else(|| id.clone());
             self.inner.qh_ensure_app_id(team, &name, &id).await?;
-            let app_id = self
-                .inner
-                .qh_get_app_id(team, &id)
-                .await?
-                .ok_or_else(|| SignError::Developer(format!("刚创建的 App ID {id} 查不到")))?;
+            let app_id = self.inner.qh_get_app_id(team, &id).await?.ok_or_else(|| {
+                SignError::Developer(ictl_l10n::trf!(
+                    "刚创建的 App ID {id} 查不到",
+                    "The App ID {id} that was just created can't be found"
+                ))
+            })?;
             let data = self.inner.qh_get_profile(team, &app_id.app_id_id).await?.provisioning_profile.encoded_profile;
             let data: Vec<u8> = data.as_ref().to_vec();
             // 合并 entitlements 后在下面签名前写进 bundle
@@ -189,13 +197,20 @@ impl Session {
                 if let (Some(exe), Some(id)) = (b.executable(), b.identifier())
                     && let Err(e) = prov.merge_entitlements(b.dir.join(exe), &id)
                 {
-                    tracing::warn!("合并 {} 的 entitlements 失败，只用描述文件里的：{e}", b.dir.display());
+                    tracing::warn!(
+                        "{}",
+                        ictl_l10n::trf!(
+                            "合并 {} 的 entitlements 失败，只用描述文件里的：{e}",
+                            "Merging the entitlements of {} failed, using only those from the provisioning profile: {e}",
+                            b.dir.display()
+                        )
+                    );
                 }
                 std::fs::write(b.dir.join("embedded.mobileprovision"), &prov.data)?;
                 let xml = String::from_utf8_lossy(&prov.entitlements_as_bytes()?).into_owned();
                 settings.set_entitlements_xml(SettingsScope::Main, xml)?;
             }
-            tracing::info!("签名 {}", b.dir.display());
+            tracing::info!("{}", ictl_l10n::trf!("签名 {}", "Signing {}", b.dir.display()));
             UnifiedSigner::new(settings).sign_path_in_place(&b.dir)?;
         }
         if let Some(key) = &cert.key {
@@ -218,21 +233,40 @@ pub fn verify_signed(app_dir: &Path, udid: &str, signing_cert: Option<&[u8]>) ->
             continue;
         }
         if !b.dir.join("_CodeSignature/CodeResources").is_file() {
-            return Err(SignError::Verify(format!("{} 没有签名", b.dir.display())));
+            return Err(SignError::Verify(ictl_l10n::trf!("{} 没有签名", "{} is not signed", b.dir.display())));
         }
     }
-    let p = Profile::load(&app_dir.join("embedded.mobileprovision"))
-        .ok_or_else(|| SignError::Verify("主程序没有可解析的 embedded.mobileprovision".into()))?;
+    let p = Profile::load(&app_dir.join("embedded.mobileprovision")).ok_or_else(|| {
+        SignError::Verify(
+            ictl_l10n::tr!(
+                "主程序没有可解析的 embedded.mobileprovision",
+                "the main executable has no readable embedded.mobileprovision"
+            )
+            .into(),
+        )
+    })?;
     if !p.devices.iter().any(|d| d == udid) {
-        return Err(SignError::Verify("描述文件里没有这台手机，先注册设备".into()));
+        return Err(SignError::Verify(
+            ictl_l10n::tr!(
+                "描述文件里没有这台手机，先注册设备",
+                "this phone is not in the provisioning profile; register the device first"
+            )
+            .into(),
+        ));
     }
     if !p.get_task_allow {
-        return Err(SignError::Verify("描述文件不带 get-task-allow，WDA 起不来".into()));
+        return Err(SignError::Verify(
+            ictl_l10n::tr!(
+                "描述文件不带 get-task-allow，WDA 起不来",
+                "the provisioning profile lacks get-task-allow, WDA won't start"
+            )
+            .into(),
+        ));
     }
     if let Some(der) = signing_cert
         && !p.certificates.iter().any(|c| c == der)
     {
-        return Err(SignError::Verify("描述文件里没有签名用的证书（证书在描述文件生成后才换过），手机会拒装".into()));
+        return Err(SignError::Verify(ictl_l10n::tr!("描述文件里没有签名用的证书（证书在描述文件生成后才换过），手机会拒装", "the provisioning profile doesn't contain the signing certificate (the certificate changed after the profile was created); the phone would refuse to install it").into()));
     }
     Ok(p)
 }

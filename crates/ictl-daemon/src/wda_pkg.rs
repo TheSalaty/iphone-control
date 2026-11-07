@@ -21,26 +21,31 @@ pub async fn ensure(dest: &Path) -> Result<(), String> {
     if dest.is_file() {
         return Ok(());
     }
-    let dir = dest.parent().ok_or("WDA 包路径没有上级目录")?;
+    let dir = dest
+        .parent()
+        .ok_or(ictl_l10n::tr!("WDA 包路径没有上级目录", "the WDA package path has no parent directory"))?;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let url = url();
-    tracing::info!("下载未签名的 WDA {url}");
+    tracing::info!("{}", ictl_l10n::trf!("下载未签名的 WDA {url}", "Downloading the unsigned WDA {url}"));
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(600))
         .build()
-        .map_err(|e| format!("下载 WDA 失败：{e}"))?;
+        .map_err(|e| ictl_l10n::trf!("下载 WDA 失败：{e}", "Downloading WDA failed: {e}"))?;
     let bytes = client
         .get(&url)
         .send()
         .await
         .and_then(|r| r.error_for_status())
-        .map_err(|e| format!("下载 WDA 失败：{e}"))?
+        .map_err(|e| ictl_l10n::trf!("下载 WDA 失败：{e}", "Downloading WDA failed: {e}"))?
         .bytes()
         .await
-        .map_err(|e| format!("下载 WDA 失败：{e}"))?;
+        .map_err(|e| ictl_l10n::trf!("下载 WDA 失败：{e}", "Downloading WDA failed: {e}"))?;
     let got = format!("{:x}", Sha256::digest(&bytes));
     if got != WDA_SHA256 {
-        return Err(format!("下载的 WDA 校验和不对（{got}，应为 {WDA_SHA256}）"));
+        return Err(ictl_l10n::trf!(
+            "下载的 WDA 校验和不对（{got}，应为 {WDA_SHA256}）",
+            "The downloaded WDA has the wrong checksum ({got}, expected {WDA_SHA256})"
+        ));
     }
     let zip = dir.join(".WDA-download.zip.part");
     let ipa = dir.join(".WDA-unsigned.ipa.part");
@@ -50,7 +55,7 @@ pub async fn ensure(dest: &Path) -> Result<(), String> {
     let _ = std::fs::remove_file(&zip);
     if let Err(e) = r {
         let _ = std::fs::remove_file(&ipa);
-        return Err(format!("转换 WDA 包失败：{e}"));
+        return Err(ictl_l10n::trf!("转换 WDA 包失败：{e}", "Converting the WDA package failed: {e}"));
     }
     Ok(())
 }

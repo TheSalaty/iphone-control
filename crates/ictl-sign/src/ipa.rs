@@ -18,7 +18,12 @@ pub fn find_app(payload: &Path) -> io::Result<PathBuf> {
         .flatten()
         .map(|e| e.path())
         .find(|p| p.extension().is_some_and(|e| e == "app"))
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "ipa 里没有 Payload/*.app"))
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                ictl_l10n::tr!("ipa 里没有 Payload/*.app", "no Payload/*.app in the ipa"),
+            )
+        })
 }
 
 /// 把 `root` 下的 `Payload/` 打成 ipa
@@ -35,7 +40,10 @@ pub fn from_app_zip(src: &Path, out: &Path) -> io::Result<()> {
     let mut zip = ZipArchive::new(File::open(src)?).map_err(io::Error::other)?;
     // zip 9 起条目名不合法（例如带 `..`）时给的是错误：这种条目不算
     if !zip.file_names().flatten().any(|n| n.split('/').next().is_some_and(|top| top.ends_with(".app"))) {
-        return Err(io::Error::new(io::ErrorKind::NotFound, "zip 根目录下没有 .app"));
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            ictl_l10n::tr!("zip 根目录下没有 .app", "no .app at the root of the zip"),
+        ));
     }
     let mut w = ZipWriter::new(File::create(out)?);
     w.add_directory("Payload/", SimpleFileOptions::default().unix_permissions(0o755)).map_err(io::Error::other)?;

@@ -43,27 +43,27 @@ pub const LABEL: &str = "iphone-control";
 
 #[derive(Debug, thiserror::Error)]
 pub enum DeviceError {
-    #[error("设备未连接")]
+    #[error("{}", ictl_l10n::tr!("设备未连接", "Device not connected"))]
     NotConnected,
-    #[error("设备未配对，需要在手机上点「信任」")]
+    #[error("{}", ictl_l10n::tr!("设备未配对，需要在手机上点「信任」", "Device not paired: tap “Trust” on the phone"))]
     NotPaired,
-    #[error("手机上的「信任此电脑」弹窗还在等待确认")]
+    #[error("{}", ictl_l10n::tr!("手机上的「信任此电脑」弹窗还在等待确认", "The “Trust This Computer” prompt on the phone is still waiting for an answer"))]
     PairingPending,
-    #[error("用户在手机上拒绝了配对")]
+    #[error("{}", ictl_l10n::tr!("用户在手机上拒绝了配对", "Pairing was declined on the phone"))]
     PairingDenied,
-    #[error("开发者模式未开启")]
+    #[error("{}", ictl_l10n::tr!("开发者模式未开启", "Developer Mode is off"))]
     DeveloperModeOff,
     /// 锁屏且自开机以来从未解锁（BFU），或锁屏时建隧道，都会报这个
-    #[error("手机锁屏（PasswordProtected），需要解锁")]
+    #[error("{}", ictl_l10n::tr!("手机锁屏（PasswordProtected），需要解锁", "The phone is locked (PasswordProtected) and has to be unlocked"))]
     PasswordProtected,
-    #[error("下载开发者镜像失败：{0}")]
+    #[error("{}", ictl_l10n::trf!("下载开发者镜像失败：{0}", "Failed to download the developer disk image: {0}", .0))]
     Download(String),
     #[error("{0}")]
     Io(#[from] std::io::Error),
-    #[error("idevice：{0}")]
+    #[error("{}", ictl_l10n::trf!("idevice：{0}", "idevice: {0}", .0))]
     Idevice(String),
     /// 手机上的服务没在限定时间内应答。调用方应丢掉隧道重建
-    #[error("超时：{0}")]
+    #[error("{}", ictl_l10n::trf!("超时：{0}", "Timed out: {0}", .0))]
     Timeout(String),
     /// 调用方给的参数不合法（例如 HID 不能输入的字符）。与连接无关，不需要重建会话
     #[error("{0}")]
@@ -75,7 +75,9 @@ const QUERY: Duration = Duration::from_secs(15);
 
 /// 给对手机的一次调用加时限：卡住的服务不能把调用方（守护进程持锁时）一起卡死
 pub(crate) async fn limit<T>(what: &str, d: Duration, f: impl Future<Output = Result<T>>) -> Result<T> {
-    tokio::time::timeout(d, f).await.map_err(|_| DeviceError::Timeout(format!("{what}（{} 秒）", d.as_secs())))?
+    tokio::time::timeout(d, f)
+        .await
+        .map_err(|_| DeviceError::Timeout(ictl_l10n::trf!("{what}（{} 秒）", "{what} ({} s)", d.as_secs())))?
 }
 
 impl From<IdeviceError> for DeviceError {
@@ -225,7 +227,7 @@ fn ioreg_has_ios_device(out: &str) -> bool {
 
 /// usbmuxd 看到的 USB 设备（不含网络设备）。usbmuxd 没在运行时返回错误。
 pub async fn list_devices() -> Result<Vec<UsbDevice>> {
-    limit("列出 usbmuxd 设备", QUERY, async {
+    limit(ictl_l10n::tr!("列出 usbmuxd 设备", "list usbmuxd devices"), QUERY, async {
         // 不用 UsbmuxdConnection::default()：它固定连 /var/run/usbmuxd，不看 USBMUXD_SOCKET_ADDRESS
         let mut mux = usbmuxd_addr().connect(0).await?;
         Ok(mux
@@ -288,7 +290,7 @@ impl Device {
     /// usbmuxd 里有没有这台手机的配对记录。只有「没有记录」算 false；连不上 usbmuxd 等错误照常返回，
     /// 免得 usbmuxd 抖一下就让状态变成「请在手机上点信任」
     pub async fn paired(&self) -> Result<bool> {
-        limit("查配对记录", QUERY, async {
+        limit(ictl_l10n::tr!("查配对记录", "check the pairing record"), QUERY, async {
             let mut mux = self.provider.addr.connect(0).await?;
             match mux.get_pair_record(&self.udid).await {
                 Ok(_) => Ok(true),
@@ -303,7 +305,7 @@ impl Device {
     /// 发起配对：手机上弹「信任此电脑」。用户还没点时返回 [`DeviceError::PairingPending`]，调用方应轮询重试。
     /// 成功后配对记录交给 usbmuxd 保存（容器里即 `/var/lib/lockdown`）。
     pub async fn pair(&self, host_name: &str) -> Result<()> {
-        limit("配对", Duration::from_secs(30), async {
+        limit(ictl_l10n::tr!("配对", "pair"), Duration::from_secs(30), async {
             let mut mux = self.provider.addr.connect(0).await?;
             let buid = mux.get_buid().await?;
             let mut lockdown = LockdownClient::connect(&*self.provider).await?;
@@ -318,7 +320,7 @@ impl Device {
 
     /// 名称、型号、iOS 版本（不需要配对）
     pub async fn info(&self) -> Result<DeviceInfo> {
-        limit("读设备信息", QUERY, self.info_inner()).await
+        limit(ictl_l10n::tr!("读设备信息", "read device info"), QUERY, self.info_inner()).await
     }
 
     async fn info_inner(&self) -> Result<DeviceInfo> {
@@ -327,7 +329,10 @@ impl Device {
             match lockdown.get_value(Some(key), None).await {
                 Ok(v) => v.as_string().map(str::to_owned).unwrap_or_default(),
                 Err(e) => {
-                    tracing::warn!("读设备信息 {key} 失败：{e}");
+                    tracing::warn!(
+                        "{}",
+                        ictl_l10n::trf!("读设备信息 {key} 失败：{e}", "Reading device info {key} failed: {e}")
+                    );
                     String::new()
                 }
             }
@@ -343,12 +348,14 @@ impl Device {
     /// 手机上装着的全部描述文件（.mobileprovision 原始内容，经 misagent 读）。装 App 时随包带的描述文件会留在这里，
     /// 用它判断「这台手机上的 WDA 还能用多久」：同一个 Apple ID 给几台手机先后签过，每台装的是各自那一次签的
     pub async fn installed_profiles(&self) -> Result<Vec<Vec<u8>>> {
-        limit("读描述文件", QUERY, async { Ok(MisagentClient::connect(&*self.provider).await?.copy_all().await?) })
-            .await
+        limit(ictl_l10n::tr!("读描述文件", "read provisioning profiles"), QUERY, async {
+            Ok(MisagentClient::connect(&*self.provider).await?.copy_all().await?)
+        })
+        .await
     }
 
     pub async fn developer_mode_enabled(&self) -> Result<bool> {
-        limit("查开发者模式", QUERY, async {
+        limit(ictl_l10n::tr!("查开发者模式", "check Developer Mode"), QUERY, async {
             Ok(AmfiClient::connect(&*self.provider).await?.get_developer_mode_status().await?)
         })
         .await
@@ -356,7 +363,7 @@ impl Device {
 
     /// 让「设置 → 隐私与安全性」里出现开发者模式开关（打开仍需用户在手机上操作）
     pub async fn reveal_developer_mode(&self) -> Result<()> {
-        limit("显示开发者模式开关", QUERY, async {
+        limit(ictl_l10n::tr!("显示开发者模式开关", "reveal the Developer Mode switch"), QUERY, async {
             Ok(AmfiClient::connect(&*self.provider).await?.reveal_developer_mode_option_in_ui().await?)
         })
         .await
@@ -364,7 +371,7 @@ impl Device {
 
     /// 建立 CoreDeviceProxy 用户态隧道并完成 RSD 握手。锁屏时报 [`DeviceError::PasswordProtected`]。
     pub async fn open_tunnel(&self) -> Result<Tunnel> {
-        limit("建隧道", Duration::from_secs(30), async {
+        limit(ictl_l10n::tr!("建隧道", "open the tunnel"), Duration::from_secs(30), async {
             let proxy = CoreDeviceProxy::connect(&*self.provider).await?;
             let rsd_port = proxy.tunnel_info().server_rsd_port;
             let mut adapter = proxy.create_software_tunnel()?.to_async_handle();
@@ -377,7 +384,7 @@ impl Device {
 
     /// 已安装的 App。`include_system` 为 false 只列用户 App，为 true 只列系统 App（与 toolkit 一致）。
     pub async fn list_apps(&self, include_system: bool) -> Result<Vec<AppInfo>> {
-        limit("列出 App", Duration::from_secs(30), async {
+        limit(ictl_l10n::tr!("列出 App", "list apps"), Duration::from_secs(30), async {
             let mut proxy = InstallationProxyClient::connect(&*self.provider).await?;
             let kind = if include_system { "System" } else { "User" };
             Ok(apps::parse_apps(proxy.get_apps(Some(kind), None).await?))
@@ -387,14 +394,19 @@ impl Device {
 
     /// 经 usbmuxd 直连手机上的 TCP 端口（`iphone-control wda-bridge` 用）
     pub async fn connect_port(&self, port: u16) -> Result<Box<dyn idevice::ReadWrite>> {
-        let dev = limit("连接手机端口", QUERY, async { Ok(self.provider.connect(port).await?) }).await?;
-        dev.get_socket().ok_or_else(|| DeviceError::Idevice("连接没有套接字".into()))
+        let dev = limit(ictl_l10n::tr!("连接手机端口", "connect to a port on the phone"), QUERY, async {
+            Ok(self.provider.connect(port).await?)
+        })
+        .await?;
+        dev.get_socket().ok_or_else(|| {
+            DeviceError::Idevice(ictl_l10n::tr!("连接没有套接字", "the connection has no socket").into())
+        })
     }
 
     /// 上传并安装 .ipa 或 .app 目录
     pub async fn install(&self, package: &Path) -> Result<()> {
         // 含上传几十 MB 的包，USB 2 上也就一两分钟
-        limit("安装", Duration::from_secs(600), async {
+        limit(ictl_l10n::tr!("安装", "install"), Duration::from_secs(600), async {
             idevice::utils::installation::install_package(&*self.provider, package, None).await?;
             Ok(())
         })
@@ -421,7 +433,7 @@ impl Tunnel {
 
     /// 已挂载的开发者镜像版本，未挂载返回 None
     pub async fn ddi_mounted(&mut self) -> Result<Option<String>> {
-        limit("查询开发者镜像", Duration::from_secs(20), async {
+        limit(ictl_l10n::tr!("查询开发者镜像", "query the developer disk image"), Duration::from_secs(20), async {
             Ok(installed_ddi(&mut self.adapter, &mut self.handshake).await?.map(|c| c.version))
         })
         .await
@@ -431,14 +443,14 @@ impl Tunnel {
     pub async fn mount_ddi(&mut self, restore_dir: &Path) -> Result<String> {
         let assets = Cryptex1Assets::load(restore_dir).await?;
         // 含 TSS 联网签票
-        limit("挂载开发者镜像", Duration::from_secs(180), async {
+        limit(ictl_l10n::tr!("挂载开发者镜像", "mount the developer disk image"), Duration::from_secs(180), async {
             Ok(install_ddi(&mut self.adapter, &mut self.handshake, &assets).await?.version)
         })
         .await
     }
 
     pub async fn screenshot_png(&mut self) -> Result<Vec<u8>> {
-        limit("截图", Duration::from_secs(30), async {
+        limit(ictl_l10n::tr!("截图", "screenshot"), Duration::from_secs(30), async {
             let mut client = ScreenCaptureServiceClient::connect_rsd(&mut self.adapter, &mut self.handshake).await?;
             Ok(client.take_screenshot(None, ImageFormat::Png).await?)
         })

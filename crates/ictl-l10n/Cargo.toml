@@ -1,0 +1,13 @@
+[package]
+name = "ictl-l10n"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Language of user- and agent-facing text (Simplified Chinese or English), chosen by IPHONE_CONTROL_LANG"
+
+[dependencies]
+tokio.workspace = true

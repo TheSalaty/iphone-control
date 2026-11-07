@@ -131,7 +131,9 @@ impl<T: Transport> WdaClient<T> {
             Err(_) if status >= 400 => {
                 return Err(WdaError::Remote { kind: "http".into(), message: status.to_string() });
             }
-            Err(e) => return Err(WdaError::Interrupted(format!("响应不是 JSON：{e}"))),
+            Err(e) => {
+                return Err(WdaError::Interrupted(ictl_l10n::trf!("响应不是 JSON：{e}", "response is not JSON: {e}")));
+            }
         };
         if let Some(err) = v.get("value").and_then(|x| x.get("error")).and_then(|e| e.as_str()) {
             let msg = v["value"].get("message").and_then(|m| m.as_str()).unwrap_or_default();
@@ -157,7 +159,11 @@ impl<T: Transport> WdaClient<T> {
             .get("sessionId")
             .and_then(|s| s.as_str())
             .or_else(|| r["value"].get("sessionId").and_then(|s| s.as_str()))
-            .ok_or_else(|| WdaError::Unavailable("创建会话没有返回 sessionId".into()))?
+            .ok_or_else(|| {
+                WdaError::Unavailable(
+                    ictl_l10n::tr!("创建会话没有返回 sessionId", "creating a session returned no sessionId").into(),
+                )
+            })?
             .to_owned();
         self.session = Some(id.clone());
         Ok(id)
@@ -205,7 +211,11 @@ impl<T: Transport> WdaClient<T> {
                 let s = &v["screenSize"];
                 let size = match (s["width"].as_f64(), s["height"].as_f64()) {
                     (Some(width), Some(height)) => ScreenSize { width, height },
-                    _ => return Err(WdaError::Unavailable("/wda/screen 没有 screenSize".into())),
+                    _ => {
+                        return Err(WdaError::Unavailable(
+                            ictl_l10n::tr!("/wda/screen 没有 screenSize", "/wda/screen has no screenSize").into(),
+                        ));
+                    }
                 };
                 self.screen = Some(size);
                 size
@@ -214,7 +224,13 @@ impl<T: Transport> WdaClient<T> {
         Ok(match self.orientation().await {
             Ok(o) => elements::View { screen: o.orient(base), orientation: Some(o) },
             Err(e) => {
-                tracing::debug!("读屏幕方向失败，按缓存的屏幕尺寸算：{e}");
+                tracing::debug!(
+                    "{}",
+                    ictl_l10n::trf!(
+                        "读屏幕方向失败，按缓存的屏幕尺寸算：{e}",
+                        "Reading the screen orientation failed, using the cached screen size: {e}"
+                    )
+                );
                 elements::View { screen: base, orientation: None }
             }
         })
@@ -223,18 +239,23 @@ impl<T: Transport> WdaClient<T> {
     /// 界面相对设备竖放转了多少（`GET /rotation` 的 z）。能分出两个横屏方向，`/orientation` 分不出
     pub async fn rotation(&mut self) -> Result<ictl_device::Rotation> {
         let v = self.in_session("GET", "/rotation", None, Duration::from_secs(10)).await?;
-        v["z"]
-            .as_f64()
-            .and_then(ictl_device::Rotation::from_degrees)
-            .ok_or_else(|| WdaError::Unavailable(format!("看不懂 WDA 给的旋转角：{v}")))
+        v["z"].as_f64().and_then(ictl_device::Rotation::from_degrees).ok_or_else(|| {
+            WdaError::Unavailable(ictl_l10n::trf!(
+                "看不懂 WDA 给的旋转角：{v}",
+                "Can't make sense of the rotation WDA reported: {v}"
+            ))
+        })
     }
 
     /// 前台界面的方向
     pub async fn orientation(&mut self) -> Result<elements::Orientation> {
         let v = self.in_session("GET", "/orientation", None, Duration::from_secs(10)).await?;
-        v.as_str()
-            .and_then(elements::Orientation::from_wda)
-            .ok_or_else(|| WdaError::Unavailable(format!("看不懂 WDA 给的方向：{v}")))
+        v.as_str().and_then(elements::Orientation::from_wda).ok_or_else(|| {
+            WdaError::Unavailable(ictl_l10n::trf!(
+                "看不懂 WDA 给的方向：{v}",
+                "Can't make sense of the orientation WDA reported: {v}"
+            ))
+        })
     }
 
     /// 是否锁屏。WDA 的 `/wda/locked` 只靠 `com.apple.springboard.lockstate` 的变化通知维护
@@ -263,7 +284,18 @@ impl<T: Transport> WdaClient<T> {
         let (sheet, tree) = match self.cover_tree().await {
             Ok(x) => x,
             Err(e) => {
-                tracing::debug!("核对锁屏界面失败，按{}处理：{e}", if strict { "锁着" } else { " WDA 的结果" });
+                tracing::debug!(
+                    "{}",
+                    ictl_l10n::trf!(
+                        "核对锁屏界面失败，按{}处理：{e}",
+                        "Checking the lock screen failed, going by {}: {e}",
+                        if strict {
+                            ictl_l10n::tr!("锁着", "locked")
+                        } else {
+                            ictl_l10n::tr!(" WDA 的结果", "what WDA reported")
+                        }
+                    )
+                );
                 return Ok(LockCheck { locked: strict || wda_locked, uncertain: false, tree: None });
             }
         };
@@ -271,7 +303,13 @@ impl<T: Transport> WdaClient<T> {
             (true, elements::CoverSheet::NotificationCenter) => (false, false),
             (true, _) => (true, false),
             (false, elements::CoverSheet::Locked) => {
-                tracing::info!("WDA 报未锁屏，但屏幕上是锁屏界面（WDA 在锁屏时启动，状态未同步）");
+                tracing::info!(
+                    "{}",
+                    ictl_l10n::tr!(
+                        "WDA 报未锁屏，但屏幕上是锁屏界面（WDA 在锁屏时启动，状态未同步）",
+                        "WDA says unlocked, but the screen shows the lock screen (WDA started while locked and its state is stale)"
+                    )
+                );
                 (true, false)
             }
             // 锁屏样式、却没有锁的标记：可能是通知中心，也可能是 Touch ID 机型熄屏、有通知时的锁屏
@@ -314,12 +352,14 @@ impl<T: Transport> WdaClient<T> {
     pub async fn screenshot_png(&self) -> Result<Vec<u8>> {
         // base64 约 11MB：从 JSON 里直接拿走字符串，原地去掉换行，不再另外复制
         let Value::String(mut b64) = self.get("/screenshot").await? else {
-            return Err(WdaError::Unavailable("截图响应不是字符串".into()));
+            return Err(WdaError::Unavailable(
+                ictl_l10n::tr!("截图响应不是字符串", "screenshot response is not a string").into(),
+            ));
         };
         b64.retain(|c| !c.is_whitespace());
-        base64::engine::general_purpose::STANDARD
-            .decode(b64)
-            .map_err(|e| WdaError::Unavailable(format!("截图不是有效的 base64：{e}")))
+        base64::engine::general_purpose::STANDARD.decode(b64).map_err(|e| {
+            WdaError::Unavailable(ictl_l10n::trf!("截图不是有效的 base64：{e}", "screenshot is not valid base64: {e}"))
+        })
     }
 
     /// 元素树 XML，排除可见性等慢属性（完整树 7～8 秒，排除后约 0.3 秒）
@@ -371,7 +411,13 @@ impl<T: Transport> WdaClient<T> {
     pub async fn end_polling(&mut self) {
         let b = self.idle_baseline.unwrap_or(IdleSettings::DEFAULT);
         if let Err(e) = self.set_idle_settings(b).await {
-            tracing::warn!("轮询后恢复 WDA 等待设置失败：{e}");
+            tracing::warn!(
+                "{}",
+                ictl_l10n::trf!(
+                    "轮询后恢复 WDA 等待设置失败：{e}",
+                    "Restoring the WDA wait settings after polling failed: {e}"
+                )
+            );
         }
     }
 
@@ -395,7 +441,13 @@ impl<T: Transport> WdaClient<T> {
         self.set_idle_settings(during).await?;
         let r = self.actions(steps).await;
         if let Err(e) = self.set_idle_settings(baseline).await {
-            tracing::warn!("手势后恢复 WDA 等待设置失败：{e}");
+            tracing::warn!(
+                "{}",
+                ictl_l10n::trf!(
+                    "手势后恢复 WDA 等待设置失败：{e}",
+                    "Restoring the WDA wait settings after the gesture failed: {e}"
+                )
+            );
         }
         r
     }

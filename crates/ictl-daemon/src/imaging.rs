@@ -32,13 +32,16 @@ pub fn oriented(img_w: u32, img_h: u32, screen: ScreenSize) -> (u32, u32) {
 /// 解码后马上转成 8 位 RGB：设备截图是 16 位 RGBA（1290×2796 解出来约 29MB），后面缩放、编码都按 RGB8 做，
 /// 内存峰值和计算量都小得多；JPEG 本来也不要 alpha
 fn decode(png: &[u8]) -> Result<DynamicImage, String> {
-    let img = image::load_from_memory(png).map_err(|e| format!("截图解码失败：{e}"))?;
+    let img = image::load_from_memory(png)
+        .map_err(|e| ictl_l10n::trf!("截图解码失败：{e}", "Decoding the screenshot failed: {e}"))?;
     Ok(DynamicImage::ImageRgb8(img.into_rgb8()))
 }
 
 fn jpeg(img: &DynamicImage, quality: u8) -> Result<Vec<u8>, String> {
     let mut out = Cursor::new(Vec::new());
-    JpegEncoder::new_with_quality(&mut out, quality).encode_image(img).map_err(|e| format!("JPEG 编码失败：{e}"))?;
+    JpegEncoder::new_with_quality(&mut out, quality)
+        .encode_image(img)
+        .map_err(|e| ictl_l10n::trf!("JPEG 编码失败：{e}", "JPEG encoding failed: {e}"))?;
     Ok(out.into_inner())
 }
 
@@ -52,7 +55,8 @@ pub const THUMB_W: u32 = 48;
 pub const THUMB_H: u32 = 104;
 
 pub fn thumbnail(png: &[u8]) -> Result<Vec<u8>, String> {
-    let img = image::load_from_memory(png).map_err(|e| format!("截图解码失败：{e}"))?;
+    let img = image::load_from_memory(png)
+        .map_err(|e| ictl_l10n::trf!("截图解码失败：{e}", "Decoding the screenshot failed: {e}"))?;
     // 最近邻足够：只比较前后两帧，不看画质；比三角滤波快一个数量级
     Ok(img.resize_exact(THUMB_W, THUMB_H, FilterType::Nearest).into_luma8().into_raw())
 }
@@ -117,7 +121,13 @@ pub fn full_screen(png: &[u8], screen: ScreenSize, via: &str) -> Result<(Vec<u8>
     let img = decode(png)?;
     let (w, h) = oriented(img.width(), img.height(), screen);
     let out = jpeg(&img.resize_exact(w, h, filter_for((img.width(), img.height()), (w, h))), 80)?;
-    Ok((out, format!("{w}x{h} 点,图像像素即点坐标(经 {via})")))
+    Ok((
+        out,
+        ictl_l10n::trf!(
+            "{w}x{h} 点,图像像素即点坐标(经 {via})",
+            "{w}x{h} points, image pixels are point coordinates (via {via})"
+        ),
+    ))
 }
 
 /// 区域放大的几何计算（纯函数）：裁剪框（原图像素）、输出尺寸、放大倍数、裁剪后的点区域
@@ -143,7 +153,12 @@ pub fn plan_zoom(
     let (x1, y1) = (x.max(0.0), y.max(0.0));
     let (x2, y2) = ((x + width).min(w), (y + height).min(h));
     if x2 - x1 < 1.0 || y2 - y1 < 1.0 {
-        return Err(format!("放大区域不在屏幕内(屏幕 {}x{} 点)", w, h));
+        return Err(ictl_l10n::trf!(
+            "放大区域不在屏幕内(屏幕 {}x{} 点)",
+            "The zoom region is outside the screen (screen {}x{} points)",
+            w,
+            h
+        ));
     }
     let px = img_w as f64 / w; // 每点对应的原图像素，一般是 3
     let (cx1, cy1) = ((x1 * px).round() as u32, (y1 * px).round() as u32);
@@ -171,8 +186,9 @@ pub fn region(
     }
     let (x1, y1, rw, rh) = p.region;
     let (x, y, z) = (fmt_g(x1), fmt_g(y1), fmt_3g(p.zoom));
-    let caption = format!(
+    let caption = ictl_l10n::trf!(
         "区域 ({x},{y}) 起 {}x{} 点,放大 {z} 倍;图中像素 (u,v) 对应屏幕点 ({x}+u/{z}, {y}+v/{z})(经 {via})",
+        "Region from ({x},{y}), {}x{} points, zoomed {z}x; image pixel (u,v) is screen point ({x}+u/{z}, {y}+v/{z}) (via {via})",
         fmt_g(rw),
         fmt_g(rh)
     );

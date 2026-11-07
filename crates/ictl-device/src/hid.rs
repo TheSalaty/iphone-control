@@ -120,14 +120,15 @@ impl HidSession {
     ) -> Result<Self> {
         let stream = crate::media::start(adapter, handshake, 1).await?;
         // 时限加在这里而不是外层：外层取消会直接丢掉媒体流，走不到下面的 stop
-        let clients = limit("连接 HID 服务", Duration::from_secs(20), async {
-            // backboardd 要一点时间把 HID 设备和刚授权的媒体流对上
-            tokio::time::sleep(Duration::from_millis(300)).await;
-            let touch = UniversalHidServiceClient::connect_rsd(adapter, handshake).await?;
-            let indigo = IndigoHidClient::connect_rsd(adapter, handshake).await?;
-            Ok::<_, DeviceError>((touch, indigo))
-        })
-        .await;
+        let clients =
+            limit(ictl_l10n::tr!("连接 HID 服务", "connect to the HID service"), Duration::from_secs(20), async {
+                // backboardd 要一点时间把 HID 设备和刚授权的媒体流对上
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                let touch = UniversalHidServiceClient::connect_rsd(adapter, handshake).await?;
+                let indigo = IndigoHidClient::connect_rsd(adapter, handshake).await?;
+                Ok::<_, DeviceError>((touch, indigo))
+            })
+            .await;
         match clients {
             Ok((touch, indigo)) => Ok(Self {
                 screen: screen.portrait(),
@@ -152,7 +153,10 @@ impl HidSession {
 
     pub async fn tap(&mut self, x: f64, y: f64) -> Result<()> {
         let (hx, hy) = self.hid_point((x, y));
-        limit("HID 点击", Duration::from_secs(10), async { Ok(self.touch.tap(hx, hy).await?) }).await
+        limit(ictl_l10n::tr!("HID 点击", "HID tap"), Duration::from_secs(10), async {
+            Ok(self.touch.tap(hx, hy).await?)
+        })
+        .await
     }
 
     /// 拖动：按时长换算采样数（每 20ms 一个点，至少 10 个），太快会被识别成点击
@@ -161,12 +165,15 @@ impl HidSession {
         let (x2, y2) = self.hid_point(to);
         let steps = ((seconds * 1000.0 / 20.0).round() as u32).max(10);
         let d = Duration::from_secs_f64(seconds.max(0.0) + 10.0);
-        limit("HID 拖动", d, async { Ok(self.touch.drag(x1, y1, x2, y2, steps, 20).await?) }).await
+        limit(ictl_l10n::tr!("HID 拖动", "HID drag"), d, async {
+            Ok(self.touch.drag(x1, y1, x2, y2, steps, 20).await?)
+        })
+        .await
     }
 
     pub async fn press(&mut self, button: Button) -> Result<()> {
         let (page, code, hold) = button.usage();
-        limit("HID 按键", Duration::from_secs(10), async {
+        limit(ictl_l10n::tr!("HID 按键", "HID key press"), Duration::from_secs(10), async {
             self.indigo.send_button(page, code, ButtonState::Down).await?;
             tokio::time::sleep(Duration::from_millis(hold)).await;
             Ok(self.indigo.send_button(page, code, ButtonState::Up).await?)
@@ -178,10 +185,17 @@ impl HidSession {
     pub async fn type_ascii(&mut self, text: &str) -> Result<()> {
         let keys: Vec<_> = text
             .chars()
-            .map(|c| ascii_to_usage(c).ok_or_else(|| DeviceError::InvalidInput(format!("HID 不能输入字符 {c:?}"))))
+            .map(|c| {
+                ascii_to_usage(c).ok_or_else(|| {
+                    DeviceError::InvalidInput(ictl_l10n::trf!(
+                        "HID 不能输入字符 {c:?}",
+                        "HID can't type the character {c:?}"
+                    ))
+                })
+            })
             .collect::<Result<_>>()?;
         let d = Duration::from_secs(10) + Duration::from_millis(50 * keys.len() as u64);
-        limit("HID 输入", d, self.send_keys(keys)).await
+        limit(ictl_l10n::tr!("HID 输入", "HID typing"), d, self.send_keys(keys)).await
     }
 
     async fn send_keys(&mut self, keys: Vec<(u64, bool)>) -> Result<()> {
@@ -211,7 +225,11 @@ impl Drop for HidSession {
     fn drop(&mut self) {
         if self.stream.is_some() {
             tracing::warn!(
-                "HID 会话没有 close() 就被丢掉，手机端的屏幕媒体流会一直挂着（不自动锁屏），需拔插或重开一次 HID 清掉"
+                "{}",
+                ictl_l10n::tr!(
+                    "HID 会话没有 close() 就被丢掉，手机端的屏幕媒体流会一直挂着（不自动锁屏），需拔插或重开一次 HID 清掉",
+                    "HID session dropped without close(): the phone keeps its screen media stream open (no auto-lock); replug or open HID once more to clear it"
+                )
             );
         }
     }

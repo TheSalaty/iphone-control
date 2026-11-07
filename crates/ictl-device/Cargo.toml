@@ -10,6 +10,7 @@ homepage.workspace = true
 description = "设备层：发现、配对、隧道、开发者镜像、HID、截图、App"
 
 [dependencies]
+ictl-l10n.workspace = true
 idevice.workspace = true
 tokio.workspace = true
 thiserror.workspace = true

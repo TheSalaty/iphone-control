@@ -112,6 +112,8 @@ More: [step-by-step guide](https://derrors.github.io/iphone-control/en/guide/get
 
 Action tools accept `then: "elements" | "screenshot"` to return the screen after the action. Screenshot pixels are tap coordinates, so the agent can tap what it sees. Games, maps and video players draw their own UI and have no element tree — use screenshots and coordinates there. Full parameters: [docs/tools.md](docs/tools.md).
 
+Tool texts, results, CLI output and logs are in Simplified Chinese by default; set `IPHONE_CONTROL_LANG=en` for English ([configuration](https://derrors.github.io/iphone-control/en/guide/configuration)).
+
 ## Everyday Commands
 
 Run them as `docker exec -it iphone-control iphone-control <command>`, or directly for a source install and on macOS.

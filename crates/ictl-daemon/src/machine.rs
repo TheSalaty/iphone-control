@@ -27,15 +27,15 @@ pub enum DeviceState {
 impl DeviceState {
     pub fn describe(&self) -> String {
         match self {
-            Self::Absent => "手机未连接".into(),
-            Self::NeedsTrust => "未配对：运行 iphone-control setup，在手机上点「信任」".into(),
-            Self::DeveloperModeOff => "开发者模式未打开：运行 iphone-control setup".into(),
-            Self::NeedsUnlock => "手机锁屏，隧道建不起来：请解锁手机".into(),
-            Self::NeedsSigning => "WDA 还没签名安装：运行 iphone-control sign".into(),
-            Self::WdaStarting { last_error: None } => "正在启动 WDA".into(),
-            Self::WdaStarting { last_error: Some(e) } => format!("WDA 启动失败，稍后重试：{e}"),
-            Self::NeedsAutomationPin => "WDA 卡在手机上的「Enable UI Automation」密码框：请在手机上输入锁屏密码".into(),
-            Self::Ready => "就绪".into(),
+            Self::Absent => ictl_l10n::tr!("手机未连接", "Phone not connected").into(),
+            Self::NeedsTrust => ictl_l10n::tr!("未配对：运行 iphone-control setup，在手机上点「信任」", "Not paired: run iphone-control setup and tap “Trust” on the phone").into(),
+            Self::DeveloperModeOff => ictl_l10n::tr!("开发者模式未打开：运行 iphone-control setup", "Developer Mode is off: run iphone-control setup").into(),
+            Self::NeedsUnlock => ictl_l10n::tr!("手机锁屏，隧道建不起来：请解锁手机", "The phone is locked, the tunnel can't be opened: unlock the phone").into(),
+            Self::NeedsSigning => ictl_l10n::tr!("WDA 还没签名安装：运行 iphone-control sign", "WDA not signed and installed yet: run iphone-control sign").into(),
+            Self::WdaStarting { last_error: None } => ictl_l10n::tr!("正在启动 WDA", "Starting WDA").into(),
+            Self::WdaStarting { last_error: Some(e) } => ictl_l10n::trf!("WDA 启动失败，稍后重试：{e}", "WDA failed to start, retrying later: {e}"),
+            Self::NeedsAutomationPin => ictl_l10n::tr!("WDA 卡在手机上的「Enable UI Automation」密码框：请在手机上输入锁屏密码", "WDA is stuck at the “Enable UI Automation” passcode prompt on the phone: enter the passcode on the phone").into(),
+            Self::Ready => ictl_l10n::tr!("就绪", "Ready").into(),
         }
     }
 }

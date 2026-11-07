@@ -1,6 +1,6 @@
 # MCP tools
 
-The MCP server (`iphone-control mcp`) exposes 17 tools. The tool descriptions the agent sees, and every result text, are in Simplified Chinese; this page is the English reference. The definitions live in [`crates/ictl-mcp/src/lib.rs`](../crates/ictl-mcp/src/lib.rs).
+The MCP server (`iphone-control mcp`) exposes 17 tools. The tool descriptions the agent sees, and every result text, are in Simplified Chinese by default, or in English with `IPHONE_CONTROL_LANG=en` (see [configuration](https://derrors.github.io/iphone-control/en/guide/configuration)); this page is the English reference. The definitions live in [`crates/ictl-mcp/src/lib.rs`](../crates/ictl-mcp/src/lib.rs).
 
 Coordinates are in **points**, the same unit as the pixels of a full-screen `iphone_screenshot` (for example 430×932 on an iPhone 15 Pro Max), so an agent can read a position off a screenshot and tap it directly. Coordinates follow the current screen orientation: after a rotation the same spot has different coordinates, so take a new screenshot. Screen sizes differ per device (an iPad mini 5 is 768×1024 in portrait); don't assume 430×932.
 

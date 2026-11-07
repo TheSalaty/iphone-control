@@ -172,9 +172,29 @@ impl Request {
 /// 工具结果里报告系统弹窗挡着屏幕的固定写法（后面接「弹窗文字」）。MCP 端据此判断结果里是否已经报过弹窗，
 /// 不能只找「系统弹窗」几个字：按名字点到的元素文字里也可能有
 pub const ALERT_BLOCKING: &str = "屏幕上有系统弹窗";
+/// English version of [`ALERT_BLOCKING`]
+pub const ALERT_BLOCKING_EN: &str = "a system alert is on screen";
 
 /// `iphone_tap_element` 没点到时结果开头的几种写法（不算出错，单独调用时是普通结果；批量里要停下）
 pub const TAP_MISSED: [&str; 3] = ["没找到", "只匹配到", "被挡住"];
+/// English version of [`TAP_MISSED`]
+pub const TAP_MISSED_EN: [&str; 3] = ["Not found", "Only matched", "Covered"];
+
+/// The [`TAP_MISSED`] prefixes in the current language (the daemon writes them)
+pub fn tap_missed_prefixes() -> [&'static str; 3] {
+    if ictl_l10n::is_en() { TAP_MISSED_EN } else { TAP_MISSED }
+}
+
+/// Does a result report a blocking system alert, in either language? Daemon and MCP server may run with
+/// different `IPHONE_CONTROL_LANG`, so the readers accept both
+pub fn reports_alert(text: &str) -> bool {
+    text.contains(ALERT_BLOCKING) || text.contains(ALERT_BLOCKING_EN)
+}
+
+/// Does an `iphone_tap_element` result say it tapped nothing, in either language?
+pub fn is_tap_missed(text: &str) -> bool {
+    TAP_MISSED.iter().chain(TAP_MISSED_EN.iter()).any(|p| text.starts_with(p))
+}
 
 /// 请求里带上这个键（值为 true）：客户端发完请求不半关闭连接，守护进程据此把「读到 EOF」当成调用方已经走了，
 /// 还在排队等设备的请求就不再执行。旧版本的客户端发完就半关闭、不带这个键，守护进程对它们照旧处理完。
@@ -184,6 +204,10 @@ pub const CANCEL_ON_CLOSE: &str = "cancel_on_close";
 /// 请求里带上这个键（值为 UDID）：守护进程正在控制的不是这台就不执行。`iphone_batch` 用它防止中途换了设备
 /// （自动选设备时拔掉正在控制的那台，会改控另一台）后，剩下的步骤落到另一台上
 pub const EXPECT_UDID: &str = "expect_udid";
+
+/// Request key carrying the client's language (`zh` / `en`). The daemon answers in it; requests without it
+/// (older clients) get Chinese, as before. Older daemons ignore the extra key
+pub const LANG: &str = "lang";
 
 /// 发一个请求、读一个响应（客户端用）。`timeout` 为 None 时一直等（例如 `sign` 要等签名装完）。
 /// 返回之前被丢掉（超时、调用方取消）时连接随之关闭，守护进程会放弃还在排队的这个请求
@@ -209,6 +233,7 @@ pub async fn call_expecting(
         let mut v = serde_json::to_value(req)?;
         if let Some(o) = v.as_object_mut() {
             o.insert(CANCEL_ON_CLOSE.into(), true.into());
+            o.insert(LANG.into(), ictl_l10n::lang().code().into());
             if let Some(u) = expect_udid {
                 o.insert(EXPECT_UDID.into(), u.into());
             }
@@ -225,7 +250,7 @@ pub async fn call_expecting(
         Some(t) => tokio::time::timeout(t, exchange).await.map_err(|_| {
             std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
-                format!("守护进程 {} 秒内没有应答（可能正忙，例如正在启动 WDA 或重签）", t.as_secs()),
+                ictl_l10n::trf!("守护进程 {} 秒内没有应答（可能正忙，例如正在启动 WDA 或重签）", "The daemon didn't answer within {} seconds (it may be busy, for example starting WDA or re-signing)", t.as_secs()),
             )
         })?,
     }
@@ -245,11 +270,14 @@ mod tests {
         assert_eq!(e, Response::error("x"));
     }
 
-    /// 旧版本守护进程直接反序列化请求：多出来的 cancel_on_close 键不能让它报错（含没有字段的请求）
+    /// 旧版本守护进程直接反序列化请求：多出来的 cancel_on_close、lang 键不能让它报错（含没有字段的请求）
     #[test]
     fn extra_cancel_key_is_ignored_when_parsing() {
-        for s in [r#"{"op":"status","cancel_on_close":true}"#, r#"{"op":"tap","x":1.0,"y":2.0,"cancel_on_close":true}"#]
-        {
+        for s in [
+            r#"{"op":"status","cancel_on_close":true}"#,
+            r#"{"op":"tap","x":1.0,"y":2.0,"cancel_on_close":true}"#,
+            r#"{"op":"status","cancel_on_close":true,"lang":"en"}"#,
+        ] {
             serde_json::from_str::<Request>(s).unwrap_or_else(|e| panic!("{s}: {e}"));
         }
     }

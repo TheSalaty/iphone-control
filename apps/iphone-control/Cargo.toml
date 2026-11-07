@@ -10,6 +10,7 @@ homepage.workspace = true
 description = "iphone-control 命令行入口"
 
 [dependencies]
+ictl-l10n.workspace = true
 ictl-daemon.workspace = true
 ictl-device.workspace = true
 ictl-mcp.workspace = true

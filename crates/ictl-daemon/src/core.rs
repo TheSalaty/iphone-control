@@ -57,7 +57,13 @@ impl Persisted {
         let Ok(bytes) = std::fs::read(path) else { return Self::default() };
         serde_json::from_slice(&bytes).unwrap_or_else(|e| {
             // 损坏时按空状态启动（会显示「WDA 还没签名」），但要留痕
-            tracing::warn!("state.json 解析失败，按空状态启动：{e}");
+            tracing::warn!(
+                "{}",
+                ictl_l10n::trf!(
+                    "state.json 解析失败，按空状态启动：{e}",
+                    "Parsing state.json failed, starting with an empty state: {e}"
+                )
+            );
             Self::default()
         })
     }
@@ -67,7 +73,7 @@ impl Persisted {
         let r = std::fs::write(&tmp, serde_json::to_vec_pretty(self).unwrap_or_default())
             .and_then(|_| std::fs::rename(&tmp, path));
         if let Err(e) = r {
-            tracing::warn!("保存 state.json 失败：{e}");
+            tracing::warn!("{}", ictl_l10n::trf!("保存 state.json 失败：{e}", "Saving state.json failed: {e}"));
         }
     }
 
@@ -238,16 +244,30 @@ pub fn device_label(i: &DeviceInfo) -> String {
 pub(crate) fn wda_down(state: &DeviceState, info: Option<&DeviceInfo>) -> String {
     // 没接设备时 WDA 不会自己起来，也没有 HID 后备
     if matches!(state, DeviceState::Absent) {
-        return "WDA 不可用(手机未连接);接上设备后守护进程会自动拉起 WDA".into();
+        return ictl_l10n::tr!(
+            "WDA 不可用(手机未连接);接上设备后守护进程会自动拉起 WDA",
+            "WDA unavailable (phone not connected); the daemon starts WDA once a device is plugged in"
+        )
+        .into();
     }
     let fallback = if hid_supported(info) {
-        "截图/点击/滑动/按键可照常用"
+        ictl_l10n::tr!("截图/点击/滑动/按键可照常用", "screenshots/taps/swipes/buttons still work")
     } else {
-        "这台手机 iOS 低于 27,没有 HID 后备路线,WDA 恢复前截图、点击等操作都用不了"
+        ictl_l10n::tr!(
+            "这台手机 iOS 低于 27,没有 HID 后备路线,WDA 恢复前截图、点击等操作都用不了",
+            "this phone runs iOS below 27 and has no HID fallback, so screenshots, taps etc. don't work until WDA is back"
+        )
     };
     // 状态还是「就绪」：WDA 在两次巡检之间刚掉线，下一轮巡检才会发现并重新拉起
-    let why = if *state == DeviceState::Ready { "刚掉线".to_owned() } else { state.describe() };
-    format!("WDA 不可用({why}),守护进程一般 1~2 分钟内会拉起;{fallback}")
+    let why = if *state == DeviceState::Ready {
+        ictl_l10n::tr!("刚掉线", "just dropped").to_owned()
+    } else {
+        state.describe()
+    };
+    ictl_l10n::trf!(
+        "WDA 不可用({why}),守护进程一般 1~2 分钟内会拉起;{fallback}",
+        "WDA unavailable ({why}), the daemon usually restarts it within 1-2 minutes; {fallback}"
+    )
 }
 
 /// HID 后备路线（免 WDA 截图、点击）只有 iOS 27 起能用；不知道版本时照常尝试
@@ -351,8 +371,8 @@ impl Daemon {
         }
         let r = self.cfg.ensure_passcodes_dir().and_then(|_| std::fs::rename(&legacy, &dst));
         match r {
-            Ok(()) => self.log.log(&format!("旧的锁屏密码只有一份，USB 上只接着 {}，归到它名下", d.udid)),
-            Err(e) => tracing::warn!("把旧的锁屏密码归到 {} 名下失败：{e}", d.udid),
+            Ok(()) => self.log.log(&ictl_l10n::trf!("旧的锁屏密码只有一份，USB 上只接着 {}，归到它名下", "There is a single passcode saved by an older version and only {} is on USB; assigning it to that device", d.udid)),
+            Err(e) => tracing::warn!("{}", ictl_l10n::trf!("把旧的锁屏密码归到 {} 名下失败：{e}", "Assigning the old passcode to {} failed: {e}", d.udid)),
         }
     }
 
@@ -361,7 +381,7 @@ impl Daemon {
             return;
         }
         let (title, body) = e.title_body();
-        self.log.log(&format!("通知：{title}"));
+        self.log.log(&ictl_l10n::trf!("通知：{title}", "Notification: {title}"));
         let cfg = self.cfg.notify.clone();
         if cfg.any() {
             tokio::spawn(async move {
@@ -372,7 +392,7 @@ impl Daemon {
 
     pub(crate) fn set_state(&self, g: &mut Inner, s: DeviceState) {
         if g.state != s {
-            self.log.log(&format!("状态：{}", s.describe()));
+            self.log.log(&ictl_l10n::trf!("状态：{}", "State: {}", s.describe()));
             g.state = s;
         }
     }
@@ -393,7 +413,13 @@ impl Daemon {
                 None => DeviceProfile::Missing,
             },
             Err(e) => {
-                tracing::warn!("读手机上的描述文件失败，按签名记录算：{e}");
+                tracing::warn!(
+                    "{}",
+                    ictl_l10n::trf!(
+                        "读手机上的描述文件失败，按签名记录算：{e}",
+                        "Reading the provisioning profiles on the phone failed, going by the signing record: {e}"
+                    )
+                );
                 DeviceProfile::Unknown(e.to_string())
             }
         };
@@ -485,7 +511,7 @@ impl Daemon {
             Some(mut gone) => tokio::select! {
                 biased;
                 g = self.inner.lock() => g,
-                Ok(()) = &mut gone => return Response::error("调用方已取消,请求没有执行"),
+                Ok(()) = &mut gone => return Response::error(ictl_l10n::tr!("调用方已取消,请求没有执行", "The caller cancelled; the request was not carried out")),
             },
             None => self.inner.lock().await,
         };
@@ -493,15 +519,20 @@ impl Daemon {
         if let Some(want) = &ctx.expect_udid {
             let now = g.device.as_ref().map(|d| d.udid.as_str());
             if now != Some(want.as_str()) {
-                return Response::error(format!(
+                return Response::error(ictl_l10n::trf!(
                     "正在控制的设备变了(原来是 {want},现在{}),没有执行;先用 iphone_list_devices 确认",
-                    now.map_or("没有设备".into(), |u| format!("是 {u}"))
+                    "The controlled device changed (it was {want}, now {}); not carried out. Check with iphone_list_devices first",
+                    now.map_or(ictl_l10n::tr!("没有设备", "there is no device").into(), |u| ictl_l10n::trf!(
+                        "是 {u}",
+                        "it is {u}"
+                    ))
                 ));
             }
         }
         if req.is_device_action() && queued_at.elapsed() > STALE {
-            return Response::error(format!(
+            return Response::error(ictl_l10n::trf!(
                 "守护进程正忙,这个操作排队超过 {} 秒,已放弃执行(以免落到已经变化的屏幕上);先截图看看再重试",
+                "The daemon is busy and this action waited in the queue for more than {} seconds, so it was dropped (it could have landed on a changed screen); take a screenshot and try again",
                 STALE.as_secs()
             ));
         }
@@ -540,7 +571,7 @@ impl Daemon {
             Request::UnlockReset => {
                 let _ = std::fs::remove_file(self.cfg.unlock_disabled_flag());
                 g.dedup.clear("unlock");
-                Ok("已恢复自动解锁".into())
+                Ok(ictl_l10n::tr!("已恢复自动解锁", "Auto-unlock re-enabled").into())
             }
             Request::ListDevices => Ok(self.list_devices_text(g)),
             Request::SelectDevice { device } => self.select_device(g, &device).await,
@@ -555,7 +586,7 @@ impl Daemon {
 
     pub async fn shutdown(&self) {
         let mut g = self.inner.lock().await;
-        self.log.log("收到停止信号,退出");
+        self.log.log(ictl_l10n::tr!("收到停止信号,退出", "Received stop signal, exiting"));
         // 先停 HID 媒体流、runner（经 usbmuxd），再停 usbmuxd
         self.drop_session(&mut g).await;
         if let Some(mut c) = g.usbmuxd.take() {
@@ -567,11 +598,19 @@ impl Daemon {
 /// 参数检查（与设备无关，不必拿锁）
 fn check_request(req: &Request) -> Result<(), String> {
     match req {
-        Request::Settle { max_ms } if *max_ms > MAX_WAIT_MS => return Err(format!("max_ms 不能超过 {MAX_WAIT_MS}")),
-        Request::WaitFor { timeout_ms, .. } if *timeout_ms > MAX_WAIT_MS => {
-            return Err(format!("timeout 不能超过 {} 秒", MAX_WAIT_MS / 1000));
+        Request::Settle { max_ms } if *max_ms > MAX_WAIT_MS => {
+            return Err(ictl_l10n::trf!("max_ms 不能超过 {MAX_WAIT_MS}", "max_ms can't exceed {MAX_WAIT_MS}"));
         }
-        Request::WaitFor { text, .. } if text.is_empty() => return Err("text 不能为空".into()),
+        Request::WaitFor { timeout_ms, .. } if *timeout_ms > MAX_WAIT_MS => {
+            return Err(ictl_l10n::trf!(
+                "timeout 不能超过 {} 秒",
+                "timeout can't exceed {} seconds",
+                MAX_WAIT_MS / 1000
+            ));
+        }
+        Request::WaitFor { text, .. } if text.is_empty() => {
+            return Err(ictl_l10n::tr!("text 不能为空", "text can't be empty").into());
+        }
         _ => {}
     }
     let seconds = match req {
@@ -579,7 +618,10 @@ fn check_request(req: &Request) -> Result<(), String> {
         _ => return Ok(()),
     };
     if !seconds.is_finite() || !(0.0..=MAX_GESTURE_SECONDS).contains(&seconds) {
-        return Err(format!("seconds 要在 0 到 {MAX_GESTURE_SECONDS} 之间"));
+        return Err(ictl_l10n::trf!(
+            "seconds 要在 0 到 {MAX_GESTURE_SECONDS} 之间",
+            "seconds must be between 0 and {MAX_GESTURE_SECONDS}"
+        ));
     }
     Ok(())
 }

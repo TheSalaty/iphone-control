@@ -46,7 +46,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # vendor/ 是上游代码，不格式化；只检查本仓库的包
       - name: fmt
-        run: for p in ictl-device ictl-wda ictl-sign ictl-unlock ictl-daemon ictl-mcp ictl-protocol iphone-control; do cargo fmt -p $p -- --check; done
+        run: for p in ictl-l10n ictl-device ictl-wda ictl-sign ictl-unlock ictl-daemon ictl-mcp ictl-protocol iphone-control; do cargo fmt -p $p -- --check; done
       # --all-features：默认不编的 debug-cmds（调试子命令）也要能编译
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - run: cargo test --workspace --all-features --locked

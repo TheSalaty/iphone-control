@@ -72,26 +72,33 @@ async fn wait_foreground(wda: &ictl_wda::WdaClient<ictl_wda::http::DeviceTranspo
 fn check(step: &str, t0: Instant, ok: bool, detail: String) -> anyhow::Result<()> {
     let el = t0.elapsed().as_secs_f64();
     if ok {
-        println!("✓ {step}（{el:.2}s）{detail}");
+        println!("{}", ictl_l10n::trf!("✓ {step}（{el:.2}s）{detail}", "✓ {step} ({el:.2}s){detail}"));
         Ok(())
     } else {
-        println!("✗ {step}（{el:.2}s）{detail}");
-        anyhow::bail!("{step} 失败：{detail}")
+        println!("{}", ictl_l10n::trf!("✗ {step}（{el:.2}s）{detail}", "✗ {step} ({el:.2}s){detail}"));
+        anyhow::bail!("{}", ictl_l10n::trf!("{step} 失败：{detail}", "{step} failed: {detail}"))
     }
 }
 
 async fn e2e(device: &Device, bundle_id: &str, out: &std::path::Path) -> anyhow::Result<()> {
     let t = Instant::now();
     let mut tunnel = device.open_tunnel().await?;
-    check("建隧道", t, true, String::new())?;
+    check(ictl_l10n::tr!("建隧道", "open tunnel"), t, true, String::new())?;
 
     let t = Instant::now();
     let ddi = tunnel.ddi_mounted().await?;
-    check("开发者镜像", t, ddi.is_some(), ddi.unwrap_or_else(|| "未挂载（先运行 ddi 子命令）".into()))?;
+    check(
+        ictl_l10n::tr!("开发者镜像", "developer disk image"),
+        t,
+        ddi.is_some(),
+        ddi.unwrap_or_else(|| {
+            ictl_l10n::tr!("未挂载（先运行 ddi 子命令）", "not mounted (run the ddi subcommand first)").into()
+        }),
+    )?;
 
     let t = Instant::now();
     let (runner, mut wda) = ictl_wda::WdaRunner::start(device.provider(), bundle_id, Duration::from_secs(60)).await?;
-    check("启动 WDA", t, true, String::new())?;
+    check(ictl_l10n::tr!("启动 WDA", "start WDA"), t, true, String::new())?;
     let r = e2e_with_wda(&mut tunnel, &mut wda, out).await;
     runner.stop();
     r
@@ -106,22 +113,37 @@ async fn e2e_with_wda(
     let t = Instant::now();
     wda.press_button("home").await?;
     let now = wait_foreground(wda, SPRINGBOARD).await;
-    check("回主屏", t, now == SPRINGBOARD, format!("前台 {now}"))?;
+    check(
+        ictl_l10n::tr!("回主屏", "home screen"),
+        t,
+        now == SPRINGBOARD,
+        ictl_l10n::trf!("前台 {now}", "foreground {now}"),
+    )?;
 
     let t = Instant::now();
     let png = wda.screenshot_png().await?;
     std::fs::write(out, &png)?;
-    check("WDA 截图", t, png.starts_with(b"\x89PNG"), format!("{} 字节 → {}", png.len(), out.display()))?;
+    check(
+        ictl_l10n::tr!("WDA 截图", "WDA screenshot"),
+        t,
+        png.starts_with(b"\x89PNG"),
+        ictl_l10n::trf!("{} 字节 → {}", "{} bytes → {}", png.len(), out.display()),
+    )?;
 
     let t = Instant::now();
     let els = wda.elements().await?;
     // 系统语言是中文或英文时主屏上「设置」的名字
     let icon = els.iter().find(|e| matches!(e.label.as_str(), "设置" | "Settings") && e.kind == "Icon").cloned();
     check(
-        "读元素",
+        ictl_l10n::tr!("读元素", "read elements"),
         t,
         icon.is_some(),
-        format!("{} 个元素；「设置」{}", els.len(), icon.as_ref().map_or("未找到".into(), |e| e.describe())),
+        ictl_l10n::trf!(
+            "{} 个元素；「设置」{}",
+            "{} elements; “Settings” {}",
+            els.len(),
+            icon.as_ref().map_or(ictl_l10n::tr!("未找到", "not found").into(), |e| e.describe())
+        ),
     )?;
     let (x, y) = icon.unwrap().center;
     let (x, y) = (x as f64, y as f64);
@@ -129,27 +151,37 @@ async fn e2e_with_wda(
     let t = Instant::now();
     wda.tap(x, y).await?;
     let now = wait_foreground(wda, PREFERENCES).await;
-    check("WDA 点「设置」", t, now == PREFERENCES, format!("前台 {now}"))?;
+    check(
+        ictl_l10n::tr!("WDA 点「设置」", "WDA tap “Settings”"),
+        t,
+        now == PREFERENCES,
+        ictl_l10n::trf!("前台 {now}", "foreground {now}"),
+    )?;
 
     let t = Instant::now();
     wda.press_button("home").await?;
     let now = wait_foreground(wda, SPRINGBOARD).await;
-    check("WDA Home", t, now == SPRINGBOARD, format!("前台 {now}"))?;
+    check("WDA Home", t, now == SPRINGBOARD, ictl_l10n::trf!("前台 {now}", "foreground {now}"))?;
 
     // HID 路线：同样的点击和 Home，以 WDA 的前台 App 判断是否生效
     let screen = wda.screen_size().await?;
     let t = Instant::now();
     let hid = tunnel.hid(screen).await?;
-    check("打开 HID 会话", t, true, String::new())?;
+    check(ictl_l10n::tr!("打开 HID 会话", "open HID session"), t, true, String::new())?;
     let r = async {
         let t = Instant::now();
         hid.tap(x, y).await?;
         let now = wait_foreground(wda, PREFERENCES).await;
-        check("HID 点「设置」", t, now == PREFERENCES, format!("前台 {now}"))?;
+        check(
+            ictl_l10n::tr!("HID 点「设置」", "HID tap “Settings”"),
+            t,
+            now == PREFERENCES,
+            ictl_l10n::trf!("前台 {now}", "foreground {now}"),
+        )?;
         let t = Instant::now();
         hid.press(Button::Home).await?;
         let now = wait_foreground(wda, SPRINGBOARD).await;
-        check("HID Home", t, now == SPRINGBOARD, format!("前台 {now}"))
+        check("HID Home", t, now == SPRINGBOARD, ictl_l10n::trf!("前台 {now}", "foreground {now}"))
     }
     .await;
     // 停掉屏幕媒体流，否则手机端一直挂着
@@ -160,18 +192,31 @@ async fn e2e_with_wda(
 pub async fn run(udid: Option<&str>, args: DebugArgs) -> anyhow::Result<()> {
     let device = Device::find(udid).await?;
     let info = device.info().await?;
-    println!("手机 {} iOS {}", info.product_type, info.product_version);
+    println!("{}", ictl_l10n::trf!("手机 {} iOS {}", "Phone {} iOS {}", info.product_type, info.product_version));
     let screen = ScreenSize { width: args.width, height: args.height };
     match args.check {
         Check::Ddi { restore_dir, url } => {
             let mut t = device.open_tunnel().await?;
             match t.ddi_mounted().await? {
-                Some(v) => println!("开发者镜像已挂载 {v}（要测挂载流程，先在手机重启后的未挂载状态下运行）"),
+                Some(v) => println!(
+                    "{}",
+                    ictl_l10n::trf!(
+                        "开发者镜像已挂载 {v}（要测挂载流程，先在手机重启后的未挂载状态下运行）",
+                        "Developer disk image already mounted {v} (to test mounting, run it after a phone reboot while it is unmounted)"
+                    )
+                ),
                 None => {
                     let dir = ictl_device::ddi::ensure_cache(&restore_dir, &url).await?;
                     let t0 = Instant::now();
                     let v = t.mount_ddi(&dir).await?;
-                    println!("挂载成功 {v}，耗时 {:.1}s", t0.elapsed().as_secs_f64());
+                    println!(
+                        "{}",
+                        ictl_l10n::trf!(
+                            "挂载成功 {v}，耗时 {:.1}s",
+                            "Mounted {v} in {:.1}s",
+                            t0.elapsed().as_secs_f64()
+                        )
+                    );
                 }
             }
             let t = device.open_tunnel().await?;
@@ -182,7 +227,10 @@ pub async fn run(udid: Option<&str>, args: DebugArgs) -> anyhow::Result<()> {
             let r = async {
                 let hid = t.hid(screen).await?;
                 hid.tap(x, y).await?;
-                println!("已点 ({x},{y})，3 秒后按 Home");
+                println!(
+                    "{}",
+                    ictl_l10n::trf!("已点 ({x},{y})，3 秒后按 Home", "Tapped ({x},{y}), pressing Home in 3 seconds")
+                );
                 tokio::time::sleep(Duration::from_secs(3)).await;
                 hid.press(Button::Home).await
             }
@@ -190,14 +238,29 @@ pub async fn run(udid: Option<&str>, args: DebugArgs) -> anyhow::Result<()> {
             // 停掉屏幕媒体流，否则手机端一直挂着
             t.close().await;
             r?;
-            println!("完成：请以截图/肉眼确认是否真的生效");
+            println!(
+                "{}",
+                ictl_l10n::tr!(
+                    "完成：请以截图/肉眼确认是否真的生效",
+                    "Done: confirm with a screenshot or by eye that it really worked"
+                )
+            );
         }
         Check::Screenshot { out } => {
             let mut t = device.open_tunnel().await?;
             let t0 = Instant::now();
             let png = t.screenshot_png().await?;
             std::fs::write(&out, &png)?;
-            println!("{} 字节，耗时 {:.2}s → {}", png.len(), t0.elapsed().as_secs_f64(), out.display());
+            println!(
+                "{}",
+                ictl_l10n::trf!(
+                    "{} 字节，耗时 {:.2}s → {}",
+                    "{} bytes in {:.2}s → {}",
+                    png.len(),
+                    t0.elapsed().as_secs_f64(),
+                    out.display()
+                )
+            );
         }
         Check::Soak { minutes } => {
             let mut t = device.open_tunnel().await?;
@@ -213,37 +276,62 @@ pub async fn run(udid: Option<&str>, args: DebugArgs) -> anyhow::Result<()> {
                     }
                     Err(e) => {
                         fails += 1;
-                        eprintln!("截图失败：{e}，重建隧道");
+                        eprintln!(
+                            "{}",
+                            ictl_l10n::trf!("截图失败：{e}，重建隧道", "Screenshot failed: {e}, reopening the tunnel")
+                        );
                         t = device.open_tunnel().await?;
                     }
                 }
                 tokio::time::sleep(Duration::from_secs(2)).await;
             }
-            println!("{n} 次成功、{fails} 次失败，共 {:.1} MB，最慢 {worst:.2}s", bytes as f64 / 1e6);
+            println!(
+                "{}",
+                ictl_l10n::trf!(
+                    "{n} 次成功、{fails} 次失败，共 {:.1} MB，最慢 {worst:.2}s",
+                    "{n} succeeded, {fails} failed, {:.1} MB total, slowest {worst:.2}s",
+                    bytes as f64 / 1e6
+                )
+            );
         }
         Check::Wda { bundle_id, timeout } => {
             let t0 = Instant::now();
             let (runner, mut wda) =
                 ictl_wda::WdaRunner::start(device.provider(), &bundle_id, Duration::from_secs(timeout)).await?;
-            println!("WDA 就绪，耗时 {:.1}s", t0.elapsed().as_secs_f64());
-            println!("屏幕 {:?}", wda.screen_size().await?);
+            println!("{}", ictl_l10n::trf!("WDA 就绪，耗时 {:.1}s", "WDA ready in {:.1}s", t0.elapsed().as_secs_f64()));
+            println!("{}", ictl_l10n::trf!("屏幕 {:?}", "Screen {:?}", wda.screen_size().await?));
             let t1 = Instant::now();
             let xml = wda.source_xml().await?;
             println!(
-                "元素树 {} 字节，耗时 {:.2}s，解析出 {} 个元素",
-                xml.len(),
-                t1.elapsed().as_secs_f64(),
-                wda.elements().await?.len()
+                "{}",
+                ictl_l10n::trf!(
+                    "元素树 {} 字节，耗时 {:.2}s，解析出 {} 个元素",
+                    "Element tree {} bytes in {:.2}s, {} elements parsed",
+                    xml.len(),
+                    t1.elapsed().as_secs_f64(),
+                    wda.elements().await?.len()
+                )
             );
             let t2 = Instant::now();
-            println!("截图 {} 字节，耗时 {:.2}s", wda.screenshot_png().await?.len(), t2.elapsed().as_secs_f64());
+            println!(
+                "{}",
+                ictl_l10n::trf!(
+                    "截图 {} 字节，耗时 {:.2}s",
+                    "Screenshot {} bytes in {:.2}s",
+                    wda.screenshot_png().await?.len(),
+                    t2.elapsed().as_secs_f64()
+                )
+            );
             runner.stop();
-            println!("runner 已停止");
+            println!("{}", ictl_l10n::tr!("runner 已停止", "runner stopped"));
         }
         Check::E2e { bundle_id, out } => {
             let t0 = Instant::now();
             e2e(&device, &bundle_id, &out).await?;
-            println!("全部通过，总耗时 {:.1}s", t0.elapsed().as_secs_f64());
+            println!(
+                "{}",
+                ictl_l10n::trf!("全部通过，总耗时 {:.1}s", "All passed in {:.1}s", t0.elapsed().as_secs_f64())
+            );
         }
     }
     Ok(())

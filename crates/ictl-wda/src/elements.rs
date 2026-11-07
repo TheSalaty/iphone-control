@@ -124,7 +124,13 @@ impl Rotate {
             Some(Orientation::LandscapeLeft) => Self::TopToLeft,
             Some(Orientation::LandscapeRight) => Self::TopToRight,
             o => {
-                tracing::warn!("元素树是竖屏坐标而屏幕是横的，但没有状态栏、方向是 {o:?}，坐标不换算");
+                tracing::warn!(
+                    "{}",
+                    ictl_l10n::trf!(
+                        "元素树是竖屏坐标而屏幕是横的，但没有状态栏、方向是 {o:?}，坐标不换算",
+                        "The element tree uses portrait coordinates while the screen is landscape, but there is no status bar and the orientation is {o:?}; not converting coordinates"
+                    )
+                );
                 Self::None
             }
         }
@@ -277,7 +283,11 @@ impl Tree {
             .collect();
         let d = |p: &(f64, f64)| (p.0 - center.0).powi(2) + (p.1 - center.1).powi(2);
         points.sort_by(|a, b| d(a).total_cmp(&d(b)));
-        let by = if first.name.is_empty() { "没有文字的浮层".to_owned() } else { first.name.clone() };
+        let by = if first.name.is_empty() {
+            ictl_l10n::tr!("没有文字的浮层", "an overlay without text").to_owned()
+        } else {
+            first.name.clone()
+        };
         match points.into_iter().find(|p| cover(*p).is_none()) {
             Some(p) => TapPoint::Moved { at: (p.0.round(), p.1.round()), by },
             None => TapPoint::Covered { by },
@@ -315,7 +325,11 @@ fn is_scroll_bar(kind: &str, label: &str) -> bool {
 /// 超长文字截断显示（筛选、按名字点仍按全文）
 fn clip(s: &str, max: usize, keep: usize) -> String {
     let n = s.chars().count();
-    if n <= max { s.to_owned() } else { format!("{}…(共 {n} 字)", s.chars().take(keep).collect::<String>()) }
+    if n <= max {
+        s.to_owned()
+    } else {
+        ictl_l10n::trf!("{}…(共 {n} 字)", "{}…({n} characters)", s.chars().take(keep).collect::<String>())
+    }
 }
 
 impl Element {
@@ -410,7 +424,14 @@ pub fn parse_tree(xml: &str, view: impl Into<View>) -> Tree {
             Ok(Event::Eof) => break,
             Err(e) => {
                 // 解析到一半出错：已解析的照常返回，但要留痕，否则「没找到元素」看起来像真结果
-                tracing::warn!("元素树 XML 解析出错（位置 {}），只用了前面的部分：{e}", reader.buffer_position());
+                tracing::warn!(
+                    "{}",
+                    ictl_l10n::trf!(
+                        "元素树 XML 解析出错（位置 {}），只用了前面的部分：{e}",
+                        "Error parsing the element tree XML (at {}), only the part before it is used: {e}",
+                        reader.buffer_position()
+                    )
+                );
                 break;
             }
             Ok(_) => continue,
@@ -626,7 +647,13 @@ pub fn keypad(elements: &[Element]) -> Option<[(i64, i64); 10]> {
         out[i] = k?;
     }
     if !keypad_layout_ok(&out) {
-        tracing::warn!("锁屏数字键的位置不像电话键盘（坐标可能没换算对），不按：{out:?}");
+        tracing::warn!(
+            "{}",
+            ictl_l10n::trf!(
+                "锁屏数字键的位置不像电话键盘（坐标可能没换算对），不按：{out:?}",
+                "The lock screen keypad doesn't look like a phone keypad (coordinates may be converted wrongly), not pressing: {out:?}"
+            )
+        );
         return None;
     }
     Some(out)

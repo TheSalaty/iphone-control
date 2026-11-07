@@ -10,6 +10,7 @@ homepage.workspace = true
 description = "Apple ID、描述文件、签名（含 .xctest）"
 
 [dependencies]
+ictl-l10n.workspace = true
 plume_core.workspace = true
 plume_store.workspace = true
 thiserror.workspace = true

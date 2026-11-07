@@ -62,11 +62,19 @@ impl Transport for DeviceTransport {
         let req = build_request(method, path, body.as_deref());
         let idevice = tokio::time::timeout(CONNECT_TIMEOUT, self.provider.connect(self.port))
             .await
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::NotConnected, "连接 WDA 端口超时"))?
+            .map_err(|_| {
+                std::io::Error::new(
+                    std::io::ErrorKind::NotConnected,
+                    ictl_l10n::tr!("连接 WDA 端口超时", "connecting to the WDA port timed out"),
+                )
+            })?
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotConnected, e.to_string()))?;
-        let mut sock = idevice
-            .get_socket()
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotConnected, "连接没有套接字"))?;
+        let mut sock = idevice.get_socket().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotConnected,
+                ictl_l10n::tr!("连接没有套接字", "the connection has no socket"),
+            )
+        })?;
         let fut = async {
             // 没写完 WDA 不会处理（HTTP 请求不完整），算没送到
             let not_sent = |e: std::io::Error| std::io::Error::new(std::io::ErrorKind::NotConnected, e.to_string());
@@ -98,13 +106,30 @@ impl Transport for DeviceTransport {
             parse_response(buf).map_err(after_sent)
         };
         let r = tokio::time::timeout(timeout, fut).await.map_err(|_| {
-            std::io::Error::new(std::io::ErrorKind::TimedOut, format!("请求超时（{} 秒）", timeout.as_secs()))
+            std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                ictl_l10n::trf!("请求超时（{} 秒）", "request timed out ({} s)", timeout.as_secs()),
+            )
         })?;
         // 路径截掉查询串（/source 的排除属性很长）
         let short = path.split('?').next().unwrap_or(path);
         match &r {
-            Ok((status, _)) => tracing::debug!("wda {method} {short} → {status}（{:.2}s）", t0.elapsed().as_secs_f64()),
-            Err(e) => tracing::debug!("wda {method} {short} 失败（{:.2}s）：{e}", t0.elapsed().as_secs_f64()),
+            Ok((status, _)) => tracing::debug!(
+                "{}",
+                ictl_l10n::trf!(
+                    "wda {method} {short} → {status}（{:.2}s）",
+                    "wda {method} {short} → {status} ({:.2}s)",
+                    t0.elapsed().as_secs_f64()
+                )
+            ),
+            Err(e) => tracing::debug!(
+                "{}",
+                ictl_l10n::trf!(
+                    "wda {method} {short} 失败（{:.2}s）：{e}",
+                    "wda {method} {short} failed ({:.2}s): {e}",
+                    t0.elapsed().as_secs_f64()
+                )
+            ),
         }
         r
     }
@@ -176,17 +201,25 @@ fn response_complete(raw: &[u8]) -> bool {
 pub(crate) fn parse_response(raw: impl Into<Vec<u8>>) -> std::io::Result<(u16, Vec<u8>)> {
     let mut raw = raw.into();
     let bad = |m: &str| std::io::Error::new(std::io::ErrorKind::InvalidData, m.to_owned());
-    let (split, framing) = parse_head(&raw).ok_or_else(|| bad("HTTP 响应没有头部结束标记"))?;
+    let (split, framing) = parse_head(&raw)
+        .ok_or_else(|| bad(ictl_l10n::tr!("HTTP 响应没有头部结束标记", "HTTP response has no end of headers")))?;
     let status: u16 = std::str::from_utf8(&raw[..split])
-        .map_err(|_| bad("HTTP 头不是 UTF-8"))?
+        .map_err(|_| bad(ictl_l10n::tr!("HTTP 头不是 UTF-8", "HTTP headers are not UTF-8")))?
         .split("\r\n")
         .next()
         .and_then(|l| l.split_whitespace().nth(1))
         .and_then(|s| s.parse().ok())
-        .ok_or_else(|| bad("HTTP 状态行无效"))?;
+        .ok_or_else(|| bad(ictl_l10n::tr!("HTTP 状态行无效", "invalid HTTP status line")))?;
     match framing {
-        Framing::Chunked => Ok((status, dechunk(&raw[split..]).ok_or_else(|| bad("chunked 正文不完整"))?)),
-        Framing::Length(n) if raw.len() - split < n => Err(bad("正文比 Content-Length 短，连接提前断了")),
+        Framing::Chunked => Ok((
+            status,
+            dechunk(&raw[split..])
+                .ok_or_else(|| bad(ictl_l10n::tr!("chunked 正文不完整", "incomplete chunked body")))?,
+        )),
+        Framing::Length(n) if raw.len() - split < n => Err(bad(ictl_l10n::tr!(
+            "正文比 Content-Length 短，连接提前断了",
+            "body shorter than Content-Length, the connection closed early"
+        ))),
         Framing::Length(n) => {
             raw.truncate(split + n);
             raw.drain(..split);

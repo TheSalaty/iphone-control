@@ -72,8 +72,7 @@ impl Daemon {
                 g.usbmuxd_delay = (g.usbmuxd_delay * 2).clamp(Duration::from_secs(10), USBMUXD_MAX_DELAY);
                 g.usbmuxd_retry_at = Some(Instant::now() + g.usbmuxd_delay);
                 g.usbmuxd_started = None;
-                self.log.log(&format!(
-                    "usbmuxd 启动后很快就退出了（{why}），{} 秒后再试；宿主机已在运行 usbmuxd 时设 ICTL_MANAGE_USBMUXD=0",
+                self.log.log(&ictl_l10n::trf!("usbmuxd 启动后很快就退出了（{why}），{} 秒后再试；宿主机已在运行 usbmuxd 时设 ICTL_MANAGE_USBMUXD=0", "usbmuxd exited right after starting ({why}), retrying in {} seconds; if the host already runs usbmuxd, set ICTL_MANAGE_USBMUXD=0",
                     g.usbmuxd_delay.as_secs()
                 ));
             }
@@ -101,10 +100,10 @@ impl Daemon {
                 if g.usbmuxd_retry_at.take().is_none() {
                     g.usbmuxd_delay = Duration::ZERO;
                 }
-                self.log.log("usbmuxd 已(重新)启动");
+                self.log.log(ictl_l10n::tr!("usbmuxd 已(重新)启动", "usbmuxd (re)started"));
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
-            Err(e) => self.log.log(&format!("启动 usbmuxd 失败：{e}")),
+            Err(e) => self.log.log(&ictl_l10n::trf!("启动 usbmuxd 失败：{e}", "Starting usbmuxd failed: {e}")),
         }
     }
 
@@ -118,7 +117,13 @@ impl Daemon {
 
         if g.tunnel.as_ref().is_some_and(Tunnel::hid_open) && g.hid_used.is_none_or(|t| t.elapsed() >= HID_IDLE) {
             close_hid(g).await;
-            tracing::info!("HID 会话空闲，已关闭（停止屏幕媒体流）");
+            tracing::info!(
+                "{}",
+                ictl_l10n::tr!(
+                    "HID 会话空闲，已关闭（停止屏幕媒体流）",
+                    "HID session idle, closed it (screen media stream stopped)"
+                )
+            );
         }
         self.poll_start(g).await;
 
@@ -130,7 +135,14 @@ impl Daemon {
             Err(e) => {
                 // usbmuxd 抖一下就当离线会拆掉整个会话：连续几轮都失败才算
                 g.list_errors += 1;
-                tracing::debug!("列设备失败（第 {} 次）：{e}", g.list_errors);
+                tracing::debug!(
+                    "{}",
+                    ictl_l10n::trf!(
+                        "列设备失败（第 {} 次）：{e}",
+                        "Listing devices failed (attempt {}): {e}",
+                        g.list_errors
+                    )
+                );
                 if g.list_errors < LIST_ERRORS_OFFLINE {
                     self.publish(g);
                     return;
@@ -146,8 +158,11 @@ impl Daemon {
         // 只在容器里（自己看护 usbmuxd、没有 udev）需要；用系统的 usbmuxd 服务时插拔由 udev 处理，也重启不了它
         let on_usb = ictl_device::ios_usb_count(Path::new(SYSFS_USB));
         if self.cfg.manage_usbmuxd && g.mux.observe(on_usb, g.connected.len()) {
-            self.log
-                .log(&format!("USB 上有 {on_usb} 台 iPhone/iPad,usbmuxd 只认到 {} 台,重启 usbmuxd", g.connected.len()));
+            self.log.log(&ictl_l10n::trf!(
+                "USB 上有 {on_usb} 台 iPhone/iPad,usbmuxd 只认到 {} 台,重启 usbmuxd",
+                "{on_usb} iPhone/iPad on USB but usbmuxd only sees {}, restarting usbmuxd",
+                g.connected.len()
+            ));
             self.ensure_usbmuxd(g, true).await;
         }
 
@@ -184,7 +199,7 @@ impl Daemon {
         g.device_profile = DeviceProfile::NotChecked;
         g.wda_rotation = None;
         if g.device.take().is_some() {
-            self.log.log("手机离线");
+            self.log.log(ictl_l10n::tr!("手机离线", "Phone offline"));
             // 名字、型号、iOS 版本是这台的：留着的话状态、提示文字会把它当成还在控制的设备
             g.info = None;
             self.drop_session(g).await;
@@ -204,12 +219,18 @@ impl Daemon {
         // usbmuxd 却换了编号，旧句柄的每个连接都报 bad device，永远恢复不了
         if !g.device.as_ref().is_some_and(|d| d.is_connection(seen)) {
             match g.device.take() {
-                Some(old) if old.udid == seen.udid => self.log.log(&format!(
+                Some(old) if old.udid == seen.udid => self.log.log(&ictl_l10n::trf!(
                     "手机重新接入（usbmuxd 编号 {} → {}），重建连接",
+                    "Phone reconnected (usbmuxd id {} → {}), reconnecting",
                     old.device_id(),
                     seen.device_id
                 )),
-                Some(old) => self.log.log(&format!("改为控制 {}（原来是 {}）", seen.udid, old.udid)),
+                Some(old) => self.log.log(&ictl_l10n::trf!(
+                    "改为控制 {}（原来是 {}）",
+                    "Now controlling {} (was {})",
+                    seen.udid,
+                    old.udid
+                )),
                 None => {}
             }
             self.drop_session(g).await;
@@ -224,7 +245,7 @@ impl Daemon {
             }
             let model =
                 g.info.as_ref().map(|i| format!(" {} iOS {}", i.product_type, i.product_version)).unwrap_or_default();
-            self.log.log(&format!("手机在线{model}"));
+            self.log.log(&ictl_l10n::trf!("手机在线{model}", "Phone online{model}"));
             g.device = Some(d);
             g.backoff.reset();
             g.next_resign = g.next_resign.min(Instant::now() + RESIGN_CHECK_AFTER_CONNECT);
@@ -245,7 +266,12 @@ impl Daemon {
             }
             Ok(false) => return self.set_state(g, DeviceState::NeedsTrust),
             // usbmuxd 出错：这一轮不下结论
-            Err(e) => return tracing::debug!("查配对记录失败：{e}"),
+            Err(e) => {
+                return tracing::debug!(
+                    "{}",
+                    ictl_l10n::trf!("查配对记录失败：{e}", "Checking the pairing record failed: {e}")
+                );
+            }
         }
         if g.state != DeviceState::Ready && !device.developer_mode_enabled().await.unwrap_or(true) {
             return self.set_state(g, DeviceState::DeveloperModeOff);
@@ -285,7 +311,7 @@ impl Daemon {
             return;
         }
         if g.runner.is_some() {
-            self.log.log("WDA 不可用");
+            self.log.log(ictl_l10n::tr!("WDA 不可用", "WDA unavailable"));
             // 隧道和 HID 也一起丢：WDA 掉线常常是底层连接断了（例如 usbmuxd 重启），
             // 留着旧隧道，下次查镜像就报 socket io failed 并白白退避 60 秒
             self.drop_session(g).await;
@@ -304,7 +330,7 @@ impl Daemon {
         if !matches!(g.state, DeviceState::NeedsAutomationPin | DeviceState::NeedsUnlock) {
             self.set_state(g, DeviceState::WdaStarting { last_error: None });
         }
-        self.log.log("启动 WDA");
+        self.log.log(ictl_l10n::tr!("启动 WDA", "Starting WDA"));
         let (cache, url, user_dir) = (self.cfg.ddi_cache(), self.cfg.ddi_url.clone(), self.cfg.ddi_dir.clone());
         g.starting = Some(tokio::task::spawn_local(async move {
             // 手机重启后开发者镜像可能掉了；已挂载时只是一次查询。错误带上「是不是挂载这一步」
@@ -344,12 +370,13 @@ impl Daemon {
             return;
         }
         let h = g.starting.take().expect("刚检查过");
-        let outcome =
-            h.await.unwrap_or_else(|e| StartOutcome::Wda(WdaError::StartFailed(format!("启动任务异常：{e}"))));
+        let outcome = h.await.unwrap_or_else(|e| {
+            StartOutcome::Wda(WdaError::StartFailed(ictl_l10n::trf!("启动任务异常：{e}", "Start task failed: {e}")))
+        });
         match outcome {
             StartOutcome::Ready { runner, client, mounted } => {
                 if let Some(v) = mounted {
-                    self.log.log(&format!("开发者镜像已挂载 {v}"));
+                    self.log.log(&ictl_l10n::trf!("开发者镜像已挂载 {v}", "Developer disk image mounted {v}"));
                 }
                 g.ddi_failures = 0;
                 g.runner = Some(runner);
@@ -366,13 +393,18 @@ impl Daemon {
                 if mount_failed && self.cfg.ddi_dir.is_none() {
                     g.ddi_failures += 1;
                     if g.ddi_failures >= DDI_FAILURES_INVALIDATE {
-                        self.log.log(&format!("开发者镜像连续 {} 次挂载失败，清掉缓存，下次重新下载", g.ddi_failures));
+                        self.log.log(&ictl_l10n::trf!("开发者镜像连续 {} 次挂载失败，清掉缓存，下次重新下载", "Mounting the developer disk image failed {} times in a row, clearing the cache to download it again", g.ddi_failures));
                         ictl_device::ddi::invalidate(&self.cfg.ddi_cache());
                         g.ddi_failures = 0;
                     }
                 }
                 g.backoff.failed(Instant::now());
-                self.set_state(g, DeviceState::WdaStarting { last_error: Some(format!("开发者镜像：{e}")) });
+                self.set_state(
+                    g,
+                    DeviceState::WdaStarting {
+                        last_error: Some(ictl_l10n::trf!("开发者镜像：{e}", "Developer disk image: {e}")),
+                    },
+                );
             }
             StartOutcome::Wda(WdaError::NeedsAutomationPin) => {
                 g.backoff.waiting_for_pin(Instant::now());
@@ -381,7 +413,7 @@ impl Daemon {
             }
             StartOutcome::Wda(e) => {
                 g.backoff.failed(Instant::now());
-                self.log.log(&format!("WDA 启动失败：{e}"));
+                self.log.log(&ictl_l10n::trf!("WDA 启动失败：{e}", "WDA failed to start: {e}"));
                 self.set_state(g, DeviceState::WdaStarting { last_error: Some(e.to_string()) });
             }
         }
@@ -398,18 +430,23 @@ impl Daemon {
                     Ok(Ok(_)) => Ok(()),
                     Ok(Err(ictl_sign::SignError::NotLoggedIn)) => Err(None),
                     Ok(Err(e)) => Err(Some(e.to_string())),
-                    Err(_) => Err(Some(format!("{} 分钟内没有完成", SESSION_CHECK_TIMEOUT.as_secs() / 60))),
+                    Err(_) => Err(Some(ictl_l10n::trf!(
+                        "{} 分钟内没有完成",
+                        "not finished within {} minutes",
+                        SESSION_CHECK_TIMEOUT.as_secs() / 60
+                    ))),
                 }
             })
         })
         .await
-        .unwrap_or_else(|e| Err(Some(format!("会话检查任务异常：{e}"))));
+        .unwrap_or_else(|e| Err(Some(ictl_l10n::trf!("会话检查任务异常：{e}", "Session check task failed: {e}"))));
         let mut g = self.inner.lock().await;
         match r {
             Ok(()) => g.dedup.clear("session"),
             Err(None) => {}
             Err(Some(e)) => {
-                self.log.log(&format!("Apple ID 会话检查失败：{e}"));
+                self.log
+                    .log(&ictl_l10n::trf!("Apple ID 会话检查失败：{e}", "Checking the Apple ID session failed: {e}"));
                 self.notify(&mut g, Event::SessionExpired(e));
             }
         }
@@ -426,19 +463,27 @@ impl Daemon {
                 if g.device_profile == DeviceProfile::Missing {
                     // 自动重签不替没装过的手机注册设备（占 Apple ID 的设备名额），交给用户决定
                     return Ok(
-                        "这台手机上没有装当前 Apple ID 签的 WDA,不自动重签;要装就运行 iphone-control setup".into()
+                        ictl_l10n::tr!("这台手机上没有装当前 Apple ID 签的 WDA,不自动重签;要装就运行 iphone-control setup", "No WDA signed by the current Apple ID on this phone, not re-signing automatically; run iphone-control setup to install it").into()
                     );
                 }
                 if let Some(left) = g.device_profile.left(&g.persisted)
                     && left > self.cfg.resign_min
                 {
-                    return Ok(format!("描述文件还剩 {} 小时,无需重签", left.as_secs() / 3600));
+                    return Ok(ictl_l10n::trf!(
+                        "描述文件还剩 {} 小时,无需重签",
+                        "{} hours left on the provisioning profile, no need to re-sign",
+                        left.as_secs() / 3600
+                    ));
                 }
             }
             if g.resigning {
-                return Ok("正在重签,稍后用 iphone-control status 查看结果".into());
+                return Ok(ictl_l10n::tr!(
+                    "正在重签,稍后用 iphone-control status 查看结果",
+                    "Re-signing, check the result later with iphone-control status"
+                )
+                .into());
             }
-            let device = g.device.clone().ok_or("手机未连接")?;
+            let device = g.device.clone().ok_or(ictl_l10n::tr!("手机未连接", "Phone not connected"))?;
             let name = g
                 .info
                 .as_ref()
@@ -446,7 +491,7 @@ impl Daemon {
                 .filter(|n| !n.is_empty())
                 .unwrap_or_else(|| "iphone-control".into());
             g.resigning = true;
-            self.log.log("开始重签");
+            self.log.log(ictl_l10n::tr!("开始重签", "Re-signing started"));
             (device, name)
         };
         let signed_udid = device.udid.clone();
@@ -455,7 +500,11 @@ impl Daemon {
             (self.cfg.wda_dir(), self.cfg.wda_unsigned.clone(), self.cfg.wda_signed());
         let fetch = self.cfg.wda_unsigned_is_cache() && !unsigned.is_file();
         if fetch {
-            self.log.log(&format!("没有未签名的 WDA 包（不在镜像里运行），先下载 {}", crate::wda_pkg::WDA_VERSION));
+            self.log.log(&ictl_l10n::trf!(
+                "没有未签名的 WDA 包（不在镜像里运行），先下载 {}",
+                "No unsigned WDA package (not running in the image), downloading {} first",
+                crate::wda_pkg::WDA_VERSION
+            ));
         }
         // plume_core 的签名 future 不是 Send（持有 &mut dyn FnMut 和非 Send 的私钥），放到阻塞线程里 block_on
         let r: Result<ictl_sign::Signed, String> = tokio::task::spawn_blocking(move || {
@@ -469,16 +518,25 @@ impl Daemon {
                     std::fs::create_dir_all(&wda_dir).map_err(|e| e.to_string())?;
                     let tmp = wda_dir.join("WDA-signing.ipa");
                     let signed = session.sign_ipa(&unsigned, &tmp, &device.udid).await.map_err(|e| e.to_string())?;
-                    device.install(&tmp).await.map_err(|e| format!("安装到手机失败(手机锁屏?)：{e}"))?;
+                    device.install(&tmp).await.map_err(|e| {
+                        ictl_l10n::trf!(
+                            "安装到手机失败(手机锁屏?)：{e}",
+                            "Installing on the phone failed (phone locked?): {e}"
+                        )
+                    })?;
                     std::fs::rename(&tmp, &signed_path).map_err(|e| e.to_string())?;
                     Ok(signed)
                 }))
                 .unwrap_or_else(|_| {
-                    Err(format!("{} 分钟内没有完成(苹果服务器或安装卡住)", RESIGN_TIMEOUT.as_secs() / 60))
+                    Err(ictl_l10n::trf!(
+                        "{} 分钟内没有完成(苹果服务器或安装卡住)",
+                        "not finished within {} minutes (Apple's servers or the install got stuck)",
+                        RESIGN_TIMEOUT.as_secs() / 60
+                    ))
                 })
         })
         .await
-        .unwrap_or_else(|e| Err(format!("签名任务异常退出：{e}")));
+        .unwrap_or_else(|e| Err(ictl_l10n::trf!("签名任务异常退出：{e}", "The signing task exited abnormally: {e}")));
 
         let mut g = self.inner.lock().await;
         let g = &mut *g;
@@ -489,7 +547,8 @@ impl Daemon {
                 g.persisted.team_id = Some(s.team_id);
                 g.persisted.wda_bundle = Some(s.bundle_id);
                 g.persisted.profile_expires = Some(exp);
-                g.persisted.last_resign = Some(format!("{} 成功", crate::eventlog::timestamp()));
+                g.persisted.last_resign =
+                    Some(ictl_l10n::trf!("{} 成功", "{} succeeded", crate::eventlog::timestamp()));
                 g.persisted.save(&self.cfg.state_file());
                 // 新包装上后旧的 runner 会失效，下一轮巡检重新拉起。签名期间切到了别的设备就不动它的会话
                 if g.device.as_ref().is_some_and(|d| d.udid == signed_udid) {
@@ -498,14 +557,19 @@ impl Daemon {
                     g.backoff.reset();
                 }
                 g.dedup.clear("resign");
-                let msg = format!("重签完成,新描述文件到期 {} UTC", crate::eventlog::format_utc(exp));
+                let msg = ictl_l10n::trf!(
+                    "重签完成,新描述文件到期 {} UTC",
+                    "Re-signing done, the new provisioning profile expires {} UTC",
+                    crate::eventlog::format_utc(exp)
+                );
                 self.log.log(&msg);
                 Ok(msg)
             }
             Err(e) => {
-                g.persisted.last_resign = Some(format!("{} 失败：{e}", crate::eventlog::timestamp()));
+                g.persisted.last_resign =
+                    Some(ictl_l10n::trf!("{} 失败：{e}", "{} failed: {e}", crate::eventlog::timestamp()));
                 g.persisted.save(&self.cfg.state_file());
-                self.log.log(&format!("重签失败：{e}"));
+                self.log.log(&ictl_l10n::trf!("重签失败：{e}", "Re-signing failed: {e}"));
                 Err(e)
             }
         };

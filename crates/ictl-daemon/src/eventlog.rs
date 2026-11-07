@@ -30,7 +30,7 @@ impl EventLog {
     pub fn log(&self, msg: &str) {
         tracing::info!("{msg}");
         if let Err(e) = self.append(msg) {
-            tracing::warn!("写事件日志失败：{e}");
+            tracing::warn!("{}", ictl_l10n::trf!("写事件日志失败：{e}", "Writing the event log failed: {e}"));
         }
     }
 

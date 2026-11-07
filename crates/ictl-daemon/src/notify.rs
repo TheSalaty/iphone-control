@@ -33,8 +33,10 @@ impl Event {
     /// 每类事件一个样例（`iphone-control notify-test` 用），顺序与枚举一致
     pub fn samples() -> Vec<Event> {
         vec![
-            Self::ResignFailed("（测试）苹果服务器返回错误".into()),
-            Self::SessionExpired("（测试）令牌已过期".into()),
+            Self::ResignFailed(
+                ictl_l10n::tr!("（测试）苹果服务器返回错误", "(test) Apple's server returned an error").into(),
+            ),
+            Self::SessionExpired(ictl_l10n::tr!("（测试）令牌已过期", "(test) the token expired").into()),
             Self::NeedsAutomationPin,
             Self::WdaRecovered,
             Self::UnlockDisabled,
@@ -51,27 +53,27 @@ impl Event {
     pub fn title_body(&self) -> (String, String) {
         match self {
             Self::ResignFailed(why) => (
-                "iPhone WDA 重签失败".into(),
-                format!("{why}\n描述文件过期后 WDA 将无法启动(截图/点击的 HID 路线不受影响)。\n排查: iphone-control doctor"),
+                ictl_l10n::tr!("iPhone WDA 重签失败", "iPhone: re-signing WDA failed").into(),
+                ictl_l10n::trf!("{why}\n描述文件过期后 WDA 将无法启动(截图/点击的 HID 路线不受影响)。\n排查: iphone-control doctor", "{why}\nOnce the provisioning profile expires WDA can't start (the HID path for screenshots/taps is not affected).\nTroubleshoot: iphone-control doctor"),
             ),
             Self::SessionExpired(why) => (
-                "Apple ID 会话已失效".into(),
-                format!("{why}\n下次重签前需要重新登录: iphone-control login"),
+                ictl_l10n::tr!("Apple ID 会话已失效", "Apple ID session expired").into(),
+                ictl_l10n::trf!("{why}\n下次重签前需要重新登录: iphone-control login", "{why}\nSign in again before the next re-sign: iphone-control login"),
             ),
             Self::NeedsAutomationPin => (
-                "iPhone 需要输入锁屏密码".into(),
-                "手机重启后要启用 UI 自动化:请解锁手机,在「为 XCTest 输入 iPhone 密码」弹窗里输入锁屏密码。弹窗没出现或已关闭的话,1 分钟内会重新弹出。".into(),
+                ictl_l10n::tr!("iPhone 需要输入锁屏密码", "iPhone needs the passcode").into(),
+                ictl_l10n::tr!("手机重启后要启用 UI 自动化:请解锁手机,在「为 XCTest 输入 iPhone 密码」弹窗里输入锁屏密码。弹窗没出现或已关闭的话,1 分钟内会重新弹出。", "After a reboot, UI automation has to be enabled: unlock the phone and enter the passcode in the “Enter iPhone passcode for XCTest” prompt. If the prompt didn't appear or was dismissed, it comes back within a minute.").into(),
             ),
-            Self::WdaRecovered => ("iPhone WDA 已恢复".into(), "已输入密码,WDA 重新就绪,可以正常操作了。".into()),
+            Self::WdaRecovered => (ictl_l10n::tr!("iPhone WDA 已恢复", "iPhone WDA is back").into(), ictl_l10n::tr!("已输入密码,WDA 重新就绪,可以正常操作了。", "Passcode entered, WDA is ready again and everything works.").into()),
             Self::UnlockDisabled => (
-                "iPhone 自动解锁失败,已停用".into(),
-                "整串密码输完手机仍锁着(可能密码配置不对),或输入途中出错、无法确认密码是否已提交。为免累计输错,自动解锁已停用。\n请人工解锁手机、核对密码(iphone-control passcode set),再运行 iphone-control unlock-reset。".into(),
+                ictl_l10n::tr!("iPhone 自动解锁失败,已停用", "iPhone auto-unlock failed and was disabled").into(),
+                ictl_l10n::tr!("整串密码输完手机仍锁着(可能密码配置不对),或输入途中出错、无法确认密码是否已提交。为免累计输错,自动解锁已停用。\n请人工解锁手机、核对密码(iphone-control passcode set),再运行 iphone-control unlock-reset。", "The phone stayed locked after entering the whole passcode (the configured passcode may be wrong), or an error happened while entering it so it's unclear whether it was submitted. Auto-unlock is now disabled so wrong attempts don't pile up.\nUnlock the phone by hand, check the passcode (iphone-control passcode set), then run iphone-control unlock-reset.").into(),
             ),
             Self::DeviceOffline { minutes } => (
-                format!("iPhone 已离线 {minutes} 分钟"),
-                "连不上手机:检查 USB 线、手机是否没电关机。重新连上后会自动恢复。".into(),
+                ictl_l10n::trf!("iPhone 已离线 {minutes} 分钟", "iPhone offline for {minutes} minutes"),
+                ictl_l10n::tr!("连不上手机:检查 USB 线、手机是否没电关机。重新连上后会自动恢复。", "Can't reach the phone: check the USB cable and whether the phone ran out of battery. It recovers automatically once reconnected.").into(),
             ),
-            Self::DeviceOnline { minutes } => ("iPhone 已重新连上".into(), format!("离线约 {minutes} 分钟,正在自动恢复。")),
+            Self::DeviceOnline { minutes } => (ictl_l10n::tr!("iPhone 已重新连上", "iPhone reconnected").into(), ictl_l10n::trf!("离线约 {minutes} 分钟,正在自动恢复。", "Offline for about {minutes} minutes, recovering automatically.")),
         }
     }
 }
@@ -121,7 +123,10 @@ pub async fn send(cfg: &NotifyConfig, title: &str, body: &str) -> usize {
     let client = match reqwest::Client::builder().timeout(Duration::from_secs(20)).build() {
         Ok(c) => c,
         Err(e) => {
-            tracing::warn!("通知客户端创建失败：{e}");
+            tracing::warn!(
+                "{}",
+                ictl_l10n::trf!("通知客户端创建失败：{e}", "Creating the notification client failed: {e}")
+            );
             return 0;
         }
     };
@@ -135,7 +140,10 @@ pub async fn send(cfg: &NotifyConfig, title: &str, body: &str) -> usize {
             .and_then(|r| r.error_for_status());
         match r {
             Ok(_) => ok += 1,
-            Err(e) => tracing::warn!("Telegram 发送失败：{}", e.without_url()),
+            Err(e) => tracing::warn!(
+                "{}",
+                ictl_l10n::trf!("Telegram 发送失败：{}", "Sending via Telegram failed: {}", e.without_url())
+            ),
         }
     }
     if let Some(key) = &cfg.bark_key {
@@ -147,7 +155,10 @@ pub async fn send(cfg: &NotifyConfig, title: &str, body: &str) -> usize {
             .and_then(|r| r.error_for_status());
         match r {
             Ok(_) => ok += 1,
-            Err(e) => tracing::warn!("Bark 发送失败：{}", e.without_url()),
+            Err(e) => tracing::warn!(
+                "{}",
+                ictl_l10n::trf!("Bark 发送失败：{}", "Sending via Bark failed: {}", e.without_url())
+            ),
         }
     }
     ok

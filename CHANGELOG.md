@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+### Added
+
+- English: `IPHONE_CONTROL_LANG=en` switches tool descriptions, tool results, CLI output and help, `status`/`doctor`, logs and notifications to English. The default stays Simplified Chinese, so nothing changes unless you set it.
+- The MCP server and the CLI send their language with each request and the daemon answers in it; requests from older clients carry none and get Chinese as before, so mixed versions during an upgrade keep working. `mcp-config` includes the setting when English is on.
+
 ## [0.1.4] - 2026-11-07
 
 ### Security

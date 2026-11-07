@@ -21,26 +21,26 @@ use ictl_wda::{IdleSettings, WdaClient, WdaError, elements, http::Transport, swi
 
 #[derive(Debug, thiserror::Error)]
 pub enum UnlockError {
-    #[error("手机已锁屏，且没有配置锁屏密码，需要人工解锁")]
+    #[error("{}", ictl_l10n::tr!("手机已锁屏，且没有配置锁屏密码，需要人工解锁", "The phone is locked and no passcode is configured; unlock it by hand"))]
     NoPasscode,
-    #[error("自动解锁只支持纯数字锁屏密码")]
+    #[error("{}", ictl_l10n::tr!("自动解锁只支持纯数字锁屏密码", "Auto-unlock only supports numeric passcodes"))]
     NotDigits,
-    #[error("手机已锁屏；自动解锁之前失败过已停用，请人工解锁、核对密码后运行 iphone-control unlock-reset")]
+    #[error("{}", ictl_l10n::tr!("手机已锁屏；自动解锁之前失败过已停用，请人工解锁、核对密码后运行 iphone-control unlock-reset", "The phone is locked; auto-unlock was disabled after an earlier failure. Unlock it by hand, check the passcode, then run iphone-control unlock-reset"))]
     Disabled,
     #[error(
-        "调不出锁屏密码键盘（一位都没输进去），需要人工解锁；iPhone 横放充电时会进入待机显示，那个界面调不出键盘，可在「设置 → 待机显示」里关掉"
+        "{}", ictl_l10n::tr!("调不出锁屏密码键盘（一位都没输进去），需要人工解锁；iPhone 横放充电时会进入待机显示，那个界面调不出键盘，可在「设置 → 待机显示」里关掉", "Couldn't bring up the passcode keypad (not a single digit was entered); unlock it by hand. An iPhone charging on its side shows StandBy, where the keypad can't be opened; turn it off in Settings → StandBy")
     )]
     NoKeypad,
     /// 输入不完整，不算输错
-    #[error("第 {0} 位没按上，已停止（输入不完整不算输错），稍后再试")]
+    #[error("{}", ictl_l10n::trf!("第 {0} 位没按上，已停止（输入不完整不算输错），稍后再试", "Digit {0} didn't register, stopped (an incomplete entry is not a wrong attempt); try again later", .0))]
     Incomplete(u32),
-    #[error("手机要求 {expected} 位密码，配置的是 {configured} 位，一位都没输")]
+    #[error("{}", ictl_l10n::trf!("手机要求 {expected} 位密码，配置的是 {configured} 位，一位都没输", "The phone asks for a {expected}-digit passcode but {configured} digits are configured; nothing was entered"))]
     LengthMismatch { expected: u32, configured: u32 },
     /// 整串输完仍锁着：已写停用标记
-    #[error("整串密码输完手机仍锁着，自动解锁已停用（防止输错次数累计）")]
+    #[error("{}", ictl_l10n::tr!("整串密码输完手机仍锁着，自动解锁已停用（防止输错次数累计）", "The phone is still locked after entering the whole passcode; auto-unlock is now disabled (so wrong attempts don't pile up)"))]
     WrongPasscode,
     /// 第 2 位之后出错，不知道密码是否已提交：停用标记留着
-    #[error("输入密码途中出错（{0}），无法确认是否已提交，自动解锁已停用（防止输错次数累计）")]
+    #[error("{}", ictl_l10n::trf!("输入密码途中出错（{0}），无法确认是否已提交，自动解锁已停用（防止输错次数累计）", "Error while entering the passcode ({0}); can't tell whether it was submitted, so auto-unlock is now disabled (so wrong attempts don't pile up)", .0))]
     Uncertain(String),
     #[error(transparent)]
     Wda(#[from] WdaError),
@@ -130,7 +130,10 @@ pub async fn ensure_unlocked<T: Transport>(wda: &mut WdaClient<T>, cfg: &UnlockC
     wda.set_idle_settings(IdleSettings::QUICK).await?;
     let r = unlock(wda, cfg, code.as_bytes()).await;
     if let Err(e) = wda.set_idle_settings(restore).await {
-        tracing::warn!("恢复 WDA 等待设置失败：{e}");
+        tracing::warn!(
+            "{}",
+            ictl_l10n::trf!("恢复 WDA 等待设置失败：{e}", "Restoring the WDA wait settings failed: {e}")
+        );
     }
     r
 }
@@ -224,7 +227,10 @@ async fn unlock<T: Transport>(wda: &mut WdaClient<T>, cfg: &UnlockConfig, code: 
         let view = match woke {
             Ok(v) => v,
             Err(e @ WdaError::Remote { .. }) => {
-                tracing::info!("唤醒/上滑失败，重来一轮：{e}");
+                tracing::info!(
+                    "{}",
+                    ictl_l10n::trf!("唤醒/上滑失败，重来一轮：{e}", "Wake/swipe up failed, trying another round: {e}")
+                );
                 continue;
             }
             Err(other) => return Err(other.into()),
@@ -280,11 +286,23 @@ async fn unlock<T: Transport>(wda: &mut WdaClient<T>, cfg: &UnlockConfig, code: 
 
     // 从第 2 位起，任何一下都可能凑满整串让 iOS 判定一次（按键被记成两下、最后一位）。先写停用标记，
     // 确认解开或确认没凑满才撤掉；中途出错、进程被杀都会留下标记，绝不会把同一个错误密码再输一遍
-    write_flag(cfg, "正在输入密码，未确认结果（若长期存在：上次输入中途出错或进程退出）")?;
+    write_flag(
+        cfg,
+        ictl_l10n::tr!(
+            "正在输入密码，未确认结果（若长期存在：上次输入中途出错或进程退出）",
+            "entering the passcode, result not confirmed (if this persists: the last attempt failed midway or the process exited)"
+        ),
+    )?;
     let verdict = enter_rest(wda, cfg, &pad, code).await;
     let clear = || {
         if let Err(e) = std::fs::remove_file(&cfg.disabled_flag) {
-            tracing::warn!("撤掉停用标记失败，自动解锁保持停用：{e}");
+            tracing::warn!(
+                "{}",
+                ictl_l10n::trf!(
+                    "撤掉停用标记失败，自动解锁保持停用：{e}",
+                    "Removing the disabled flag failed, auto-unlock stays disabled: {e}"
+                )
+            );
         }
     };
     match verdict {
@@ -297,11 +315,17 @@ async fn unlock<T: Transport>(wda: &mut WdaClient<T>, cfg: &UnlockConfig, code: 
             Err(UnlockError::Incomplete(n))
         }
         Ok(Verdict::Wrong) => {
-            let _ = write_flag(cfg, "整串密码输完仍是锁屏状态");
+            let _ = write_flag(
+                cfg,
+                ictl_l10n::tr!("整串密码输完仍是锁屏状态", "still locked after entering the whole passcode"),
+            );
             Err(UnlockError::WrongPasscode)
         }
         Err(e) => {
-            let why = format!("输入过程中出错，无法确认密码是否已提交：{e}");
+            let why = ictl_l10n::trf!(
+                "输入过程中出错，无法确认密码是否已提交：{e}",
+                "Error while typing, can't tell whether the passcode was submitted: {e}"
+            );
             let _ = write_flag(cfg, &why);
             Err(UnlockError::Uncertain(e.to_string()))
         }
@@ -329,7 +353,13 @@ async fn enter_rest<T: Transport>(
             return Ok(Verdict::NotSubmitted(n));
         }
         // 归零、密码栏消失等：可能已经凑满提交了，按提交处理去确认
-        tracing::warn!("第 {n} 位按后密码栏变成 {got} 位，可能已提交，确认结果");
+        tracing::warn!(
+            "{}",
+            ictl_l10n::trf!(
+                "第 {n} 位按后密码栏变成 {got} 位，可能已提交，确认结果",
+                "After digit {n} the passcode field shows {got} digits; it may have been submitted, checking the result"
+            )
+        );
         last_pressed = false;
         break;
     }

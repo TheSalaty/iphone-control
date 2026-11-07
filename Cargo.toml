@@ -4,6 +4,7 @@ members = [
     "crates/ictl-device",
     "crates/ictl-wda",
     "crates/ictl-protocol",
+    "crates/ictl-l10n",
     "crates/ictl-sign",
     "crates/ictl-unlock",
     "crates/ictl-daemon",
@@ -73,6 +74,7 @@ plume_store = { path = "vendor/plume_store" }
 ictl-device = { path = "crates/ictl-device" }
 ictl-wda = { path = "crates/ictl-wda" }
 ictl-protocol = { path = "crates/ictl-protocol" }
+ictl-l10n = { path = "crates/ictl-l10n" }
 ictl-sign = { path = "crates/ictl-sign" }
 ictl-unlock = { path = "crates/ictl-unlock" }
 ictl-daemon = { path = "crates/ictl-daemon" }

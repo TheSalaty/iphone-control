@@ -10,6 +10,7 @@ homepage.workspace = true
 description = "WDA：启动 XCTest runner、HTTP 客户端、元素树解析"
 
 [dependencies]
+ictl-l10n.workspace = true
 ictl-device.workspace = true
 idevice.workspace = true
 tokio.workspace = true

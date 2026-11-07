@@ -41,7 +41,10 @@ pub async fn run(cfg: Config) -> anyhow::Result<()> {
     }
     // 已有守护进程在用这个 socket 就退出：两个守护进程会争 usbmuxd、WDA 和 HID
     if tokio::net::UnixStream::connect(&socket).await.is_ok() {
-        bail!("已经有守护进程在运行（{}）", socket.display());
+        bail!(
+            "{}",
+            ictl_l10n::trf!("已经有守护进程在运行（{}）", "A daemon is already running ({})", socket.display())
+        );
     }
     let _ = std::fs::remove_file(&socket);
     let listener = tokio::net::UnixListener::bind(&socket)?;
@@ -58,7 +61,7 @@ pub async fn run(cfg: Config) -> anyhow::Result<()> {
 
 async fn serve(cfg: Config, listener: tokio::net::UnixListener) -> anyhow::Result<()> {
     let daemon = Daemon::new(cfg);
-    daemon.log.log("守护进程启动");
+    daemon.log.log(ictl_l10n::tr!("守护进程启动", "Daemon started"));
 
     let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     let mut tick = tokio::time::interval(core::TICK);
@@ -75,7 +78,7 @@ async fn serve(cfg: Config, listener: tokio::net::UnixListener) -> anyhow::Resul
                 Ok((stream, _)) => {
                     conns.spawn_local(serve_conn(daemon.clone(), stream));
                 }
-                Err(e) => tracing::warn!("控制接口 accept 失败：{e}"),
+                Err(e) => tracing::warn!("{}", ictl_l10n::trf!("控制接口 accept 失败：{e}", "Accepting on the control socket failed: {e}")),
             },
             Some(_) = conns.join_next(), if !conns.is_empty() => {}
             _ = tick.tick() => {
@@ -109,17 +112,21 @@ async fn serve_conn(daemon: Arc<Daemon>, stream: tokio::net::UnixStream) {
         }
         let queued_at = Instant::now();
         let resp = if line.len() as u64 > MAX_REQUEST_LINE {
-            protocol::Response::error("请求太长")
+            protocol::Response::error(ictl_l10n::tr!("请求太长", "request too long"))
         } else {
             match parse_request(&line) {
-                Ok((req, false, expect_udid)) => {
-                    daemon.handle(req, queued_at, core::CallCtx { gone: None, expect_udid }).await
+                Ok((req, false, expect_udid, lang)) => {
+                    let handling = daemon.handle(req, queued_at, core::CallCtx { gone: None, expect_udid });
+                    ictl_l10n::scope(lang, handling).await
                 }
-                Ok((req, true, expect_udid)) => {
+                Ok((req, true, expect_udid, lang)) => {
                     // 调用方断开（取消、超时）就告诉 handle：还在排队的话不再执行
                     let (gone_tx, gone_rx) = tokio::sync::oneshot::channel();
                     let mut gone_tx = Some(gone_tx);
-                    let handling = daemon.handle(req, queued_at, core::CallCtx { gone: Some(gone_rx), expect_udid });
+                    let handling = ictl_l10n::scope(
+                        lang,
+                        daemon.handle(req, queued_at, core::CallCtx { gone: Some(gone_rx), expect_udid }),
+                    );
                     tokio::pin!(handling);
                     let resp = loop {
                         tokio::select! {
@@ -134,7 +141,7 @@ async fn serve_conn(daemon: Arc<Daemon>, stream: tokio::net::UnixStream) {
                     }
                     resp
                 }
-                Err(e) => protocol::Response::error(format!("请求格式错误：{e}")),
+                Err(e) => protocol::Response::error(ictl_l10n::trf!("请求格式错误：{e}", "malformed request: {e}")),
             }
         };
         let mut out = serde_json::to_string(&resp).unwrap_or_default();
@@ -145,17 +152,19 @@ async fn serve_conn(daemon: Arc<Daemon>, stream: tokio::net::UnixStream) {
     }
 }
 
-/// 解析一行请求，并取出 [`protocol::CANCEL_ON_CLOSE`]、[`protocol::EXPECT_UDID`]
-fn parse_request(line: &[u8]) -> serde_json::Result<(protocol::Request, bool, Option<String>)> {
+/// 解析一行请求，并取出 [`protocol::CANCEL_ON_CLOSE`]、[`protocol::EXPECT_UDID`]、[`protocol::LANG`]。
+/// No language (an older client) means Chinese, which is what those clients expect and parse
+fn parse_request(line: &[u8]) -> serde_json::Result<(protocol::Request, bool, Option<String>, ictl_l10n::Lang)> {
     let mut v: serde_json::Value = serde_json::from_slice(line)?;
-    let (cancel, expect) = match v.as_object_mut() {
+    let (cancel, expect, lang) = match v.as_object_mut() {
         Some(o) => (
             o.remove(protocol::CANCEL_ON_CLOSE).is_some_and(|c| c == true),
             o.remove(protocol::EXPECT_UDID).and_then(|u| u.as_str().map(str::to_owned)),
+            o.remove(protocol::LANG).and_then(|l| l.as_str().and_then(ictl_l10n::parse)),
         ),
-        None => (false, None),
+        None => (false, None, None),
     };
-    Ok((serde_json::from_value(v)?, cancel, expect))
+    Ok((serde_json::from_value(v)?, cancel, expect, lang.unwrap_or(ictl_l10n::Lang::Zh)))
 }
 
 /// 等到调用方关掉连接（读到 EOF 或出错）。带 cancel_on_close 的客户端一个连接只发一个请求，之后不会再写
@@ -172,14 +181,20 @@ mod tests {
 
     #[test]
     fn request_options_are_taken_out_before_parsing() {
-        let (req, cancel, expect) =
-            parse_request(br#"{"op":"tap","x":1.0,"y":2.0,"cancel_on_close":true,"expect_udid":"U1"}"#).unwrap();
+        use ictl_l10n::Lang;
+        let (req, cancel, expect, lang) =
+            parse_request(br#"{"op":"tap","x":1.0,"y":2.0,"cancel_on_close":true,"expect_udid":"U1","lang":"en"}"#)
+                .unwrap();
         assert_eq!(req, protocol::Request::Tap { x: 1.0, y: 2.0 });
         assert!(cancel);
         assert_eq!(expect.as_deref(), Some("U1"));
-        // 旧版本客户端：没有这两个键
-        let (_, cancel, expect) = parse_request(br#"{"op":"status"}"#).unwrap();
+        assert_eq!(lang, Lang::En);
+        // 旧版本客户端：没有这几个键；没说语言就是中文（它们按中文的固定写法认结果）
+        let (_, cancel, expect, lang) = parse_request(br#"{"op":"status"}"#).unwrap();
         assert!(!cancel && expect.is_none());
+        assert_eq!(lang, Lang::Zh);
+        let (_, _, _, lang) = parse_request(br#"{"op":"status","lang":"klingon"}"#).unwrap();
+        assert_eq!(lang, Lang::Zh);
         assert!(parse_request(b"{").is_err());
     }
 }

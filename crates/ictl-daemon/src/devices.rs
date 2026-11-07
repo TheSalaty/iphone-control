@@ -10,9 +10,9 @@ use crate::core::{Daemon, Inner, device_label};
 /// 按 UDID 或设备名找设备，返回下标：先比 UDID（不分大小写），再比设备名，最后是设备名包含这段文字且只有一台
 pub fn resolve_device(devices: &[DeviceInfo], query: &str) -> Result<usize, String> {
     let q = query.trim();
-    let listed = || devices.iter().map(device_label).collect::<Vec<_>>().join("、");
+    let listed = || devices.iter().map(device_label).collect::<Vec<_>>().join(ictl_l10n::tr!("、", ", "));
     if devices.is_empty() {
-        return Err("USB 上没有接着设备".into());
+        return Err(ictl_l10n::tr!("USB 上没有接着设备", "No device connected over USB").into());
     }
     if let Some(i) = devices.iter().position(|d| d.udid.eq_ignore_ascii_case(q)) {
         return Ok(i);
@@ -26,10 +26,11 @@ pub fn resolve_device(devices: &[DeviceInfo], query: &str) -> Result<usize, Stri
     };
     match hits[..] {
         [i] => Ok(i),
-        [] => Err(format!("没有接着「{q}」,接着的有 {}", listed())),
-        _ => Err(format!(
+        [] => Err(ictl_l10n::trf!("没有接着「{q}」,接着的有 {}", "“{q}” is not connected; connected are {}", listed())),
+        _ => Err(ictl_l10n::trf!(
             "「{q}」对上了不止一台:{};用 UDID 指定",
-            hits.iter().map(|&i| device_label(&devices[i])).collect::<Vec<_>>().join("、")
+            "“{q}” matches more than one device: {}; use the UDID",
+            hits.iter().map(|&i| device_label(&devices[i])).collect::<Vec<_>>().join(ictl_l10n::tr!("、", ", "))
         )),
     }
 }
@@ -51,24 +52,48 @@ impl Daemon {
         let infos = self.connected_infos(g);
         if infos.is_empty() {
             return match self.pinned(g) {
-                Some(p) => format!("USB 上没有接着设备(选定的是 {p})"),
-                None => "USB 上没有接着设备".into(),
+                Some(p) => {
+                    ictl_l10n::trf!("USB 上没有接着设备(选定的是 {p})", "No device connected over USB (selected: {p})")
+                }
+                None => ictl_l10n::tr!("USB 上没有接着设备", "No device connected over USB").into(),
             };
         }
         let current = g.device.as_ref().map(|d| d.udid.as_str());
         let mode = match (&self.cfg.udid, self.pinned(g)) {
-            (Some(u), _) => format!("IPHONE_UDID 固定为 {u}"),
-            (None, Some(p)) => format!("选定了 {p}"),
-            (None, None) => "自动选(正在控制的那台断开才换)".into(),
+            (Some(u), _) => ictl_l10n::trf!("IPHONE_UDID 固定为 {u}", "IPHONE_UDID pins {u}"),
+            (None, Some(p)) => ictl_l10n::trf!("选定了 {p}", "{p} selected"),
+            (None, None) => ictl_l10n::tr!(
+                "自动选(正在控制的那台断开才换)",
+                "automatic (switches only when the controlled one disconnects)"
+            )
+            .into(),
         };
-        let mut lines = vec![format!("接着 {} 台,{mode}:", infos.len())];
+        let mut lines = vec![ictl_l10n::trf!("接着 {} 台,{mode}:", "{} connected, {mode}:", infos.len())];
         for i in &infos {
-            let mark = if Some(i.udid.as_str()) == current { "→ 正在控制 " } else { "  " };
-            let pin = if self.cfg.passcode_file_for(&i.udid).is_file() { "已设" } else { "没设" };
-            lines.push(format!("{mark}{} 自动解锁密码{pin}", device_label(i)));
+            let mark = if Some(i.udid.as_str()) == current {
+                ictl_l10n::tr!("→ 正在控制 ", "→ controlled ")
+            } else {
+                "  "
+            };
+            let pin = if self.cfg.passcode_file_for(&i.udid).is_file() {
+                ictl_l10n::tr!("已设", "set")
+            } else {
+                ictl_l10n::tr!("没设", "not set")
+            };
+            lines.push(ictl_l10n::trf!(
+                "{mark}{} 自动解锁密码{pin}",
+                "{mark}{} auto-unlock passcode {pin}",
+                device_label(i)
+            ));
         }
         if self.cfg.udid.is_none() && infos.len() > 1 {
-            lines.push("切换:iphone_select_device(UDID 或设备名),auto 改回自动选".into());
+            lines.push(
+                ictl_l10n::tr!(
+                    "切换:iphone_select_device(UDID 或设备名),auto 改回自动选",
+                    "Switch: iphone_select_device (UDID or device name), auto to go back to automatic"
+                )
+                .into(),
+            );
         }
         lines.join("\n")
     }
@@ -79,18 +104,19 @@ impl Daemon {
             self.note_connected(g, d).await;
         }
         let q = query.trim();
-        if q.eq_ignore_ascii_case("auto") || q == "自动" {
+        if q.eq_ignore_ascii_case("auto") || q == ictl_l10n::tr!("自动", "automatic") {
             if let Some(u) = &self.cfg.udid {
-                return Err(format!(
-                    "IPHONE_UDID 固定为 {u};要改回自动选,先在 .env 里清掉它再重建容器(或重启守护进程)"
+                return Err(ictl_l10n::trf!(
+                    "IPHONE_UDID 固定为 {u};要改回自动选,先在 .env 里清掉它再重建容器(或重启守护进程)",
+                    "IPHONE_UDID pins {u}; to go back to automatic, remove it from .env and recreate the container (or restart the daemon)"
                 ));
             }
             g.persisted.selected_udid = None;
             g.persisted.save(&self.cfg.state_file());
             return Ok(match g.info.as_ref().filter(|_| g.device.is_some()) {
-                Some(i) => format!("已改回自动选;正在控制 {},它断开时换成别的接着的设备", device_label(i)),
-                None if g.connected.is_empty() => "已改回自动选;现在没接设备,接上后自动控制它".into(),
-                None => "已改回自动选;10 秒内接管接着的设备,先用 iphone_status 确认就绪".into(),
+                Some(i) => ictl_l10n::trf!("已改回自动选;正在控制 {},它断开时换成别的接着的设备", "Back to automatic; controlling {}, switches to another connected device when it disconnects", device_label(i)),
+                None if g.connected.is_empty() => ictl_l10n::tr!("已改回自动选;现在没接设备,接上后自动控制它", "Back to automatic; no device connected now, it takes over the next one plugged in").into(),
+                None => ictl_l10n::tr!("已改回自动选;10 秒内接管接着的设备,先用 iphone_status 确认就绪", "Back to automatic; it takes over a connected device within 10 seconds, check readiness with iphone_status first").into(),
             });
         }
         let infos = self.connected_infos(g);
@@ -98,8 +124,9 @@ impl Daemon {
         if let Some(u) = &self.cfg.udid
             && !u.eq_ignore_ascii_case(&target.udid)
         {
-            return Err(format!(
-                "IPHONE_UDID 固定为 {u};要换设备,先改 .env 里的 IPHONE_UDID 再重建容器(或重启守护进程)"
+            return Err(ictl_l10n::trf!(
+                "IPHONE_UDID 固定为 {u};要换设备,先改 .env 里的 IPHONE_UDID 再重建容器(或重启守护进程)",
+                "IPHONE_UDID pins {u}; to switch devices, change IPHONE_UDID in .env and recreate the container (or restart the daemon)"
             ));
         }
         if self.cfg.udid.is_none() {
@@ -108,19 +135,31 @@ impl Daemon {
         }
         let label = device_label(&target);
         if g.device.as_ref().is_some_and(|d| d.udid == target.udid) {
-            return Ok(format!("已经在控制 {label},之后固定控制这台"));
+            return Ok(ictl_l10n::trf!(
+                "已经在控制 {label},之后固定控制这台",
+                "Already controlling {label}; it stays selected from now on"
+            ));
         }
-        let usb = g.connected.iter().find(|d| d.udid == target.udid).cloned().ok_or("设备刚刚断开了")?;
+        let usb = g
+            .connected
+            .iter()
+            .find(|d| d.udid == target.udid)
+            .cloned()
+            .ok_or(ictl_l10n::tr!("设备刚刚断开了", "the device just disconnected"))?;
         // 上一台的锁屏时间不能拿来等这一台
         g.last_lock = None;
         self.online(g, &usb).await;
         let pin = if self.cfg.passcode_file_for(&target.udid).is_file() {
             ""
         } else {
-            ";这台没设自动解锁密码,锁屏时要人工解锁(在这台连着时运行 iphone-control passcode set)"
+            ictl_l10n::tr!(
+                ";这台没设自动解锁密码,锁屏时要人工解锁(在这台连着时运行 iphone-control passcode set)",
+                "; this device has no auto-unlock passcode, so unlock it by hand when locked (run iphone-control passcode set while it is connected)"
+            )
         };
-        Ok(format!(
+        Ok(ictl_l10n::trf!(
             "已切换到 {label},之后固定控制这台。状态:{};WDA 起来要 10~60 秒,先用 iphone_status 确认就绪{pin}",
+            "Switched to {label}; it stays selected from now on. State: {}; WDA takes 10-60 seconds to start, check readiness with iphone_status first{pin}",
             g.state.describe()
         ))
     }

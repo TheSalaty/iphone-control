@@ -10,6 +10,7 @@ homepage.workspace = true
 description = "MCP stdio 服务（17 个 iphone_* 工具）"
 
 [dependencies]
+ictl-l10n.workspace = true
 ictl-protocol.workspace = true
 tokio.workspace = true
 rmcp.workspace = true

@@ -112,6 +112,8 @@ iphone-control mcp-config   # 打印 `claude mcp add` 命令，复制运行
 
 操作类工具可以带 `then: "elements" | "screenshot"`，顺带返回操作后的界面。截图的像素就是点击坐标，agent 看到哪里就能点哪里。游戏、地图、视频自己绘制界面，没有元素树，只能看截图按坐标操作。完整参数见 [docs/tools.md](docs/tools.md)（英文）。
 
+工具说明和结果、命令行输出、日志默认是简体中文;设 `IPHONE_CONTROL_LANG=en` 改成英文(见[配置](https://derrors.github.io/iphone-control/guide/configuration))。
+
 ## 常用命令
 
 用 `docker exec -it iphone-control iphone-control <命令>` 运行；从源码运行和在 macOS 上直接调用。

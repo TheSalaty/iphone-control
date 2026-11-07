@@ -43,14 +43,20 @@ pub(crate) async fn start(
     handshake: &mut RsdHandshake,
     display_id: i64,
 ) -> Result<ScreenMediaStream> {
-    let fail = |what: &str, e: &dyn std::fmt::Display| DeviceError::Idevice(format!("媒体流 {what}：{e}"));
+    let fail = |what: &str, e: &dyn std::fmt::Display| {
+        DeviceError::Idevice(ictl_l10n::trf!("媒体流 {what}：{e}", "media stream {what}: {e}"))
+    };
 
-    let mut client = limit("连接 displayservice", STEP, async {
-        DisplayServiceClient::connect_rsd(adapter, handshake).await.map_err(|e| fail("连接 displayservice", &e))
+    let mut client = limit(ictl_l10n::tr!("连接 displayservice", "connect to displayservice"), STEP, async {
+        DisplayServiceClient::connect_rsd(adapter, handshake)
+            .await
+            .map_err(|e| fail(ictl_l10n::tr!("连接 displayservice", "connect to displayservice"), &e))
     })
     .await?;
-    let audio_udp = adapter.bind_udp(0).await.map_err(|e| fail("绑定音频 UDP", &e))?;
-    let video_udp = adapter.bind_udp(0).await.map_err(|e| fail("绑定视频 UDP", &e))?;
+    let audio_udp =
+        adapter.bind_udp(0).await.map_err(|e| fail(ictl_l10n::tr!("绑定音频 UDP", "bind audio UDP"), &e))?;
+    let video_udp =
+        adapter.bind_udp(0).await.map_err(|e| fail(ictl_l10n::tr!("绑定视频 UDP", "bind video UDP"), &e))?;
     let receiver_ip = adapter.host_ip().to_string();
     let sender_ip = adapter.peer_ip().to_string();
 
@@ -68,7 +74,8 @@ pub(crate) async fn start(
 
     // 先起音频流建立屏幕共享会话，再在同一会话上起视频流
     let audio_call_id = uuid::Uuid::new_v4().to_string().to_uppercase();
-    let audio_offer = build_screen_audio_offer(&audio_call_id, &call_info).map_err(|e| fail("音频报价", &e))?;
+    let audio_offer = build_screen_audio_offer(&audio_call_id, &call_info)
+        .map_err(|e| fail(ictl_l10n::tr!("音频报价", "audio offer"), &e))?;
     let audio_params = build_start_audio_parameters(
         &receiver_ip,
         audio_udp.local_port(),
@@ -81,7 +88,8 @@ pub(crate) async fn start(
 
     let call_id = uuid::Uuid::new_v4().to_string().to_uppercase();
     let ssrc = uuid::Uuid::new_v4().as_u128() as u32;
-    let offer = build_screen_video_offer(&call_id, &call_info, ssrc).map_err(|e| fail("视频报价", &e))?;
+    let offer = build_screen_video_offer(&call_id, &call_info, ssrc)
+        .map_err(|e| fail(ictl_l10n::tr!("视频报价", "video offer"), &e))?;
     let params = build_start_video_parameters(
         &receiver_ip,
         video_udp.local_port(),
@@ -92,9 +100,15 @@ pub(crate) async fn start(
         display_id,
         session,
     );
-    let started = limit("启动媒体流", STEP * 2, async {
-        client.start_media_stream(audio_params).await.map_err(|e| fail("启动音频流", &e))?;
-        client.start_media_stream(params).await.map_err(|e| fail("启动视频流", &e))
+    let started = limit(ictl_l10n::tr!("启动媒体流", "start the media stream"), STEP * 2, async {
+        client
+            .start_media_stream(audio_params)
+            .await
+            .map_err(|e| fail(ictl_l10n::tr!("启动音频流", "start the audio stream"), &e))?;
+        client
+            .start_media_stream(params)
+            .await
+            .map_err(|e| fail(ictl_l10n::tr!("启动视频流", "start the video stream"), &e))
     })
     .await;
     if let Err(e) = started {
@@ -110,6 +124,12 @@ async fn stop(client: &mut DisplayServiceClient<Box<dyn ReadWrite>>) {
     match tokio::time::timeout(STEP, client.stop_media_stream()).await {
         Ok(Ok(_)) => {}
         Ok(Err(e)) => tracing::debug!("stop_media_stream: {e}"),
-        Err(_) => tracing::warn!("停止屏幕媒体流超时，手机上可能还挂着屏幕共享会话"),
+        Err(_) => tracing::warn!(
+            "{}",
+            ictl_l10n::tr!(
+                "停止屏幕媒体流超时，手机上可能还挂着屏幕共享会话",
+                "Stopping the screen media stream timed out; a screen sharing session may still be open on the phone"
+            )
+        ),
     }
 }

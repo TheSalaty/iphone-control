@@ -16,12 +16,12 @@ use ictl_daemon::protocol::{self, Request, Response};
 mod debug;
 
 #[derive(Parser)]
-#[command(name = "iphone-control", version, about = "在 Linux 或 macOS 上控制 iPhone，并提供 MCP 工具")]
+#[command(name = "iphone-control", version, about = ictl_l10n::tr!("在 Linux 或 macOS 上控制 iPhone，并提供 MCP 工具", "Control an iPhone from Linux or macOS, with MCP tools"))]
 struct Cli {
-    /// 数据根目录（账号、描述文件、日志等）。默认：root 是 /var/lib/iphone-control，普通用户是 ~/.local/share/iphone-control
+    #[arg(help = ictl_l10n::tr!("数据根目录（账号、描述文件、日志等）。默认：root 是 /var/lib/iphone-control，普通用户是 ~/.local/share/iphone-control", "Data directory (account, provisioning profiles, logs, ...). Default: /var/lib/iphone-control for root, ~/.local/share/iphone-control for a regular user"))]
     #[arg(long, env = "ICTL_DATA_DIR", default_value_os_t = protocol::default_data_dir())]
     data_dir: PathBuf,
-    /// 守护进程控制接口。默认：root 是 /run/iphone-control/ctl.sock，普通用户是 $XDG_RUNTIME_DIR/iphone-control/ctl.sock
+    #[arg(help = ictl_l10n::tr!("守护进程控制接口。默认：root 是 /run/iphone-control/ctl.sock，普通用户是 $XDG_RUNTIME_DIR/iphone-control/ctl.sock", "Daemon control socket. Default: /run/iphone-control/ctl.sock for root, $XDG_RUNTIME_DIR/iphone-control/ctl.sock for a regular user"))]
     #[arg(long, env = "ICTL_SOCKET", default_value_os_t = protocol::default_socket())]
     socket: PathBuf,
     #[command(subcommand)]
@@ -30,60 +30,60 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// 常驻守护进程（容器入口；从源码运行时由 systemd 或手动启动）
+    #[command(about = ictl_l10n::tr!("常驻守护进程（容器入口；从源码运行时由 systemd 或手动启动）", "The long-running daemon (the container's entry point; for a source install started by systemd or by hand)"))]
     Daemon,
-    /// MCP stdio 服务（由 agent 拉起）
+    #[command(about = ictl_l10n::tr!("MCP stdio 服务（由 agent 拉起）", "MCP stdio server (started by the agent)"))]
     Mcp,
-    /// 打印把 MCP 注册到 Claude Code 的命令：在容器里打印 docker exec 的写法，否则直接调用本程序
+    #[command(about = ictl_l10n::tr!("打印把 MCP 注册到 Claude Code 的命令：在容器里打印 docker exec 的写法，否则直接调用本程序", "Print the command that registers the MCP server with Claude Code: a docker exec form inside a container, otherwise this program directly"))]
     McpConfig {
-        /// 容器名；给了就按容器部署打印
+        #[arg(help = ictl_l10n::tr!("容器名；给了就按容器部署打印", "Container name; if given, print the container form"))]
         #[arg(long)]
         container: Option<String>,
     },
-    /// 守护进程和设备状态、最近的日志
+    #[command(about = ictl_l10n::tr!("守护进程和设备状态、最近的日志", "Daemon and device state, recent log"))]
     Status,
-    /// 逐层诊断，每项失败都给出修复办法
+    #[command(about = ictl_l10n::tr!("逐层诊断，每项失败都给出修复办法", "Layer-by-layer health check with a fix for each failure"))]
     Doctor,
-    /// 首次安装向导：配对 → 开发者模式 → 登录 Apple ID → 签名安装 WDA（可重复运行）
+    #[command(about = ictl_l10n::tr!("首次安装向导：配对 → 开发者模式 → 登录 Apple ID → 签名安装 WDA（可重复运行）", "Guided setup: pairing → Developer Mode → Apple ID sign-in → sign and install WDA (safe to re-run)"))]
     Setup,
-    /// 登录 Apple ID（密码和双重认证验证码只在这里输入）
+    #[command(about = ictl_l10n::tr!("登录 Apple ID（密码和双重认证验证码只在这里输入）", "Sign in to the Apple ID (the password and two-factor code are only entered here)"))]
     Login {
-        /// Apple ID 邮箱；不给就交互输入
+        #[arg(help = ictl_l10n::tr!("Apple ID 邮箱；不给就交互输入", "Apple ID email; asked for interactively if not given"))]
         email: Option<String>,
     },
-    /// 立即签名并安装 WDA
+    #[command(about = ictl_l10n::tr!("立即签名并安装 WDA", "Sign and install WDA now"))]
     Sign,
-    /// 检查描述文件，快过期就重签；--force 立即重签
+    #[command(about = ictl_l10n::tr!("检查描述文件，快过期就重签；--force 立即重签", "Check the provisioning profile and re-sign if it expires soon; --force re-signs now"))]
     Resign {
         #[arg(long)]
         force: bool,
     },
-    /// 设置/删除锁屏密码（自动解锁，默认关闭）
+    #[command(about = ictl_l10n::tr!("设置/删除锁屏密码（自动解锁，默认关闭）", "Set or remove the passcode (auto-unlock, off by default)"))]
     Passcode {
         #[command(subcommand)]
         action: PasscodeAction,
     },
-    /// 解除自动解锁的停用（输错或中途出错后停用）。只删停用标记，不核对密码：先确认保存的密码对，必要时 passcode set 重设
+    #[command(about = ictl_l10n::tr!("解除自动解锁的停用（输错或中途出错后停用）。只删停用标记，不核对密码：先确认保存的密码对，必要时 passcode set 重设", "Re-enable auto-unlock after it was disabled (by a wrong passcode or an error midway). Only removes the flag, doesn't check the passcode: make sure the saved one is right first, or set it again with passcode set"))]
     UnlockReset,
-    /// 列出 USB 上接着的设备，标出正在控制哪台
+    #[command(about = ictl_l10n::tr!("列出 USB 上接着的设备，标出正在控制哪台", "List devices connected over USB and mark the one being controlled"))]
     Devices,
-    /// 改为控制另一台设备，重启后还记得；auto 改回自动选（正在控制的那台断开才换）
+    #[command(about = ictl_l10n::tr!("改为控制另一台设备，重启后还记得；auto 改回自动选（正在控制的那台断开才换）", "Control another device, remembered across restarts; auto goes back to automatic (switches only when the controlled one disconnects)"))]
     Select {
-        /// UDID、设备名或 auto
+        #[arg(help = ictl_l10n::tr!("UDID、设备名或 auto", "UDID, device name or auto"))]
         device: String,
     },
-    /// 显式把 WDA 桥接到 127.0.0.1 供外部工具使用（默认不监听任何端口）
+    #[command(about = ictl_l10n::tr!("显式把 WDA 桥接到 127.0.0.1 供外部工具使用（默认不监听任何端口）", "Explicitly expose WDA on 127.0.0.1 for other tools (by default no port is opened)"))]
     WdaBridge {
         #[arg(long, default_value_t = 8100)]
         port: u16,
     },
-    /// 真机诊断（开发用，要用 `--features debug-cmds` 编译）。`wda`/`e2e`/`hid` 会和守护进程抢 XCTest、HID，先停掉守护进程
+    #[command(about = ictl_l10n::tr!("真机诊断（开发用，要用 `--features debug-cmds` 编译）。`wda`/`e2e`/`hid` 会和守护进程抢 XCTest、HID，先停掉守护进程", "Real-device diagnostics (for development, build with `--features debug-cmds`). `wda`/`e2e`/`hid` compete with the daemon for XCTest and HID, so stop the daemon first"))]
     #[cfg(feature = "debug-cmds")]
     #[command(hide = true)]
     Debug(debug::DebugArgs),
-    /// 按已配置的渠道发测试通知：每类事件各一条（标题带「[测试]」），或只发指定的一类
+    #[command(about = ictl_l10n::tr!("按已配置的渠道发测试通知：每类事件各一条（标题带「[测试]」），或只发指定的一类", "Send test notifications over the configured channels: one per event type (title starts with “[test]”), or only the given one"))]
     NotifyTest {
-        /// resign / session / pin / pin-recovered / unlock / offline / online；不给就全发
+        #[arg(help = ictl_l10n::tr!("resign / session / pin / pin-recovered / unlock / offline / online；不给就全发", "resign / session / pin / pin-recovered / unlock / offline / online; all if not given"))]
         event: Option<String>,
     },
 }
@@ -92,15 +92,15 @@ enum Command {
 #[derive(Subcommand)]
 enum PasscodeAction {
     Set {
-        /// 哪台设备（UDID 或设备名）；不给就是守护进程正在控制的那台
+        #[arg(help = ictl_l10n::tr!("哪台设备（UDID 或设备名）；不给就是守护进程正在控制的那台", "Which device (UDID or name); defaults to the one the daemon controls"))]
         #[arg(long)]
         device: Option<String>,
     },
     Clear {
-        /// 哪台设备（UDID 或设备名）；不给就是守护进程正在控制的那台
+        #[arg(help = ictl_l10n::tr!("哪台设备（UDID 或设备名）；不给就是守护进程正在控制的那台", "Which device (UDID or name); defaults to the one the daemon controls"))]
         #[arg(long)]
         device: Option<String>,
-        /// 删掉所有设备的密码
+        #[arg(help = ictl_l10n::tr!("删掉所有设备的密码", "Delete the passcodes of all devices"))]
         #[arg(long, conflicts_with = "device")]
         all: bool,
     },
@@ -158,31 +158,45 @@ async fn notify_test(data_dir: &Path, only: Option<&str>) -> anyhow::Result<()> 
         usize::from(cfg.bark_key.is_some()) + usize::from(cfg.tg_bot_token.is_some() && cfg.tg_chat_id.is_some());
     if channels == 0 {
         bail!(
-            "没有配置通知渠道：填 BARK_KEY，或 TG_BOT_TOKEN + TG_CHAT_ID（容器部署在 .env 里填、重建容器；\
-             从源码运行在守护进程的环境文件里填、重启守护进程）"
+            "{}",
+            ictl_l10n::tr!(
+                "没有配置通知渠道：填 BARK_KEY，或 TG_BOT_TOKEN + TG_CHAT_ID（容器部署在 .env 里填、重建容器；\
+             从源码运行在守护进程的环境文件里填、重启守护进程）",
+                "No notification channel configured: set BARK_KEY, or TG_BOT_TOKEN + TG_CHAT_ID (container: in .env, then recreate the container; source install: in the daemon's env file, then restart the daemon)"
+            )
         );
     }
     let events: Vec<Event> =
         Event::samples().into_iter().filter(|e| only.is_none_or(|n| e.sample_name() == n)).collect();
     if events.is_empty() {
         let names: Vec<&str> = Event::samples().iter().map(|e| e.sample_name()).collect();
-        bail!("没有这类事件，可选：{}", names.join(" / "));
+        bail!("{}", ictl_l10n::trf!("没有这类事件，可选：{}", "No such event; choose from: {}", names.join(" / ")));
     }
     let mut failed = 0;
     for e in &events {
         let (title, body) = e.title_body();
-        let ok = send(&cfg, &format!("[测试] {title}"), &body).await;
+        let ok = send(&cfg, &ictl_l10n::trf!("[测试] {title}", "[test] {title}"), &body).await;
         println!(
-            "{} {:<14} {title}（{ok}/{channels} 个渠道成功）",
-            if ok == channels { "✅" } else { "❌" },
-            e.sample_name()
+            "{}",
+            ictl_l10n::trf!(
+                "{} {:<14} {title}（{ok}/{channels} 个渠道成功）",
+                "{} {:<14} {title} ({ok}/{channels} channels succeeded)",
+                if ok == channels { "✅" } else { "❌" },
+                e.sample_name()
+            )
         );
         failed += usize::from(ok < channels);
         // Bark 同组消息太密会被手机合并，隔一下
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
     if failed > 0 {
-        bail!("{failed} 条没有全部发出去，详见上面的 WARN 日志");
+        bail!(
+            "{}",
+            ictl_l10n::trf!(
+                "{failed} 条没有全部发出去，详见上面的 WARN 日志",
+                "{failed} notification(s) were not sent to every channel, see the WARN log above"
+            )
+        );
     }
     Ok(())
 }
@@ -196,9 +210,12 @@ fn mcp_config(container: Option<String>, socket: &Path) -> anyhow::Result<String
     Ok(match container {
         Some(c) => format!("claude mcp add iphone -s user -- docker exec -i {c} iphone-control mcp"),
         None => {
-            let exe = std::env::current_exe().context("找不到本程序的路径")?;
+            let exe = std::env::current_exe()
+                .context(ictl_l10n::tr!("找不到本程序的路径", "can't find the path of this program"))?;
+            // 容器里的 MCP 进程继承容器的 .env；直接调用时语言要写进 MCP 配置
+            let lang = if ictl_l10n::is_en() { format!("-e {}=en ", ictl_l10n::ENV) } else { String::new() };
             format!(
-                "claude mcp add iphone -s user -- {} --socket {} mcp",
+                "claude mcp add iphone -s user {lang}-- {} --socket {} mcp",
                 shell_quote(&exe.to_string_lossy()),
                 shell_quote(&socket.to_string_lossy())
             )
@@ -221,9 +238,8 @@ async fn ask(socket: &Path, req: Request) -> anyhow::Result<Response> {
         _ => Some(Duration::from_secs(180)),
     };
     protocol::call(socket, &req, timeout).await.with_context(|| {
-        format!(
-            "连不上守护进程（{}）：先启动 iphone-control daemon（容器里是入口进程）；\
-             守护进程以别的用户运行时，用 --socket 或 ICTL_SOCKET 指到它的控制接口",
+        ictl_l10n::trf!("连不上守护进程（{}）：先启动 iphone-control daemon（容器里是入口进程）；\
+             守护进程以别的用户运行时，用 --socket 或 ICTL_SOCKET 指到它的控制接口", "Can't reach the daemon ({}): start iphone-control daemon first (in the container it is the entry process); if the daemon runs as another user, point --socket or ICTL_SOCKET at its control socket",
             socket.display()
         )
     })
@@ -247,56 +263,116 @@ async fn snapshot(socket: &Path) -> anyhow::Result<ictl_daemon::Snapshot> {
     match ask(socket, Request::Daemon).await? {
         Response::Text { text } => Ok(serde_json::from_str(&text)?),
         Response::Error { message } => bail!("{message}"),
-        Response::Image { .. } => bail!("守护进程返回了意外的响应"),
+        Response::Image { .. } => {
+            bail!("{}", ictl_l10n::tr!("守护进程返回了意外的响应", "The daemon sent an unexpected response"))
+        }
     }
 }
 
 async fn status(socket: &Path) -> anyhow::Result<()> {
     let s = snapshot(socket).await?;
-    println!("状态      {}", s.state.describe());
+    println!("{}", ictl_l10n::trf!("状态      {}", "State     {}", s.state.describe()));
     if let Some(d) = &s.device {
-        println!("手机      {} {} iOS {}", d.udid, d.product_type, d.product_version);
+        println!(
+            "{}",
+            ictl_l10n::trf!(
+                "手机      {} {} iOS {}",
+                "Phone     {} {} iOS {}",
+                d.udid,
+                d.product_type,
+                d.product_version
+            )
+        );
     }
     let current = s.device.as_ref().map(|d| d.udid.as_str());
     let others: Vec<String> =
         s.devices.iter().filter(|d| Some(d.udid.as_str()) != current).map(ictl_daemon::core::device_label).collect();
     if !others.is_empty() {
-        println!("另外接着  {}（iphone-control select 切换）", others.join("、"));
+        println!(
+            "{}",
+            ictl_l10n::trf!(
+                "另外接着  {}（iphone-control select 切换）",
+                "Also on   {} (switch with iphone-control select)",
+                others.join(ictl_l10n::tr!("、", ", "))
+            )
+        );
     }
     match (&s.pinned, s.pinned_by_env) {
-        (Some(p), true) => println!("选设备    IPHONE_UDID 固定为 {p}"),
-        (Some(p), false) => println!("选设备    选定了 {p}（iphone-control select auto 改回自动选）"),
-        (None, _) if !others.is_empty() => println!("选设备    自动（正在控制的那台断开才换）"),
+        (Some(p), true) => println!(
+            "{}",
+            ictl_l10n::trf!("选设备    IPHONE_UDID 固定为 {p}", "Device    pinned by IPHONE_UDID to {p}")
+        ),
+        (Some(p), false) => println!(
+            "{}",
+            ictl_l10n::trf!(
+                "选设备    选定了 {p}（iphone-control select auto 改回自动选）",
+                "Device    {p} selected (iphone-control select auto for automatic)"
+            )
+        ),
+        (None, _) if !others.is_empty() => println!(
+            "{}",
+            ictl_l10n::tr!(
+                "选设备    自动（正在控制的那台断开才换）",
+                "Device    automatic (switches only when the controlled one disconnects)"
+            )
+        ),
         (None, _) => {}
     }
     let p = &s.persisted;
-    println!("WDA       {}", p.wda_bundle.as_deref().unwrap_or("未签名"));
+    println!("WDA       {}", p.wda_bundle.as_deref().unwrap_or(ictl_l10n::tr!("未签名", "not signed")));
     match &s.device_profile {
         ictl_daemon::core::DeviceProfile::Missing => {
-            println!("描述文件  这台手机上没有装当前 Apple ID 签的 WDA（iphone-control setup）")
+            println!(
+                "{}",
+                ictl_l10n::tr!(
+                    "描述文件  这台手机上没有装当前 Apple ID 签的 WDA（iphone-control setup）",
+                    "Profile   no WDA signed by the current Apple ID on this phone (iphone-control setup)"
+                )
+            )
         }
         dp => {
             if let Some(left) = dp.left(p) {
                 let whose = if matches!(dp, ictl_daemon::core::DeviceProfile::Expires(_)) {
-                    "手机上的"
+                    ictl_l10n::tr!("手机上的", "on the phone, ")
                 } else {
-                    "上次签的"
+                    ictl_l10n::tr!("上次签的", "last signed, ")
                 };
-                println!("描述文件  {whose}还剩 {} 小时", left.as_secs() / 3600);
+                println!(
+                    "{}",
+                    ictl_l10n::trf!(
+                        "描述文件  {whose}还剩 {} 小时",
+                        "Profile   {whose}{} hours left",
+                        left.as_secs() / 3600
+                    )
+                );
             }
         }
     }
     if let Some(r) = &p.last_resign {
-        println!("上次重签  {r}");
+        println!("{}", ictl_l10n::trf!("上次重签  {r}", "Re-signed {r}"));
     }
     let unlock = match (s.auto_unlock, s.unlock_disabled) {
-        (_, true) => "已停用（之前输错过，iphone-control unlock-reset）",
-        (true, false) => "已启用",
-        (false, false) => "未启用",
+        (_, true) => ictl_l10n::tr!(
+            "已停用（之前输错过，iphone-control unlock-reset）",
+            "disabled (a wrong passcode earlier; iphone-control unlock-reset)"
+        ),
+        (true, false) => ictl_l10n::tr!("已启用", "enabled"),
+        (false, false) => ictl_l10n::tr!("未启用", "off"),
     };
-    println!("自动解锁  {unlock}");
-    println!("通知      {}", if s.notify_configured { "已配置" } else { "未配置" });
-    println!("\n最近日志：");
+    println!("{}", ictl_l10n::trf!("自动解锁  {unlock}", "Unlock    {unlock}"));
+    println!(
+        "{}",
+        ictl_l10n::trf!(
+            "通知      {}",
+            "Notify    {}",
+            if s.notify_configured {
+                ictl_l10n::tr!("已配置", "configured")
+            } else {
+                ictl_l10n::tr!("未配置", "not configured")
+            }
+        )
+    );
+    println!("{}", ictl_l10n::tr!("\n最近日志：", "\nRecent log:"));
     for l in s.log_tail {
         println!("  {l}");
     }
@@ -308,7 +384,13 @@ fn read_line(prompt: &str) -> anyhow::Result<String> {
     std::io::stdout().flush()?;
     let mut s = String::new();
     if std::io::stdin().lock().read_line(&mut s)? == 0 {
-        bail!("读不到输入（标准输入已关闭）：在终端里运行；容器部署用 docker exec -it");
+        bail!(
+            "{}",
+            ictl_l10n::tr!(
+                "读不到输入（标准输入已关闭）：在终端里运行；容器部署用 docker exec -it",
+                "Can't read input (stdin is closed): run it in a terminal; for a container use docker exec -it"
+            )
+        );
     }
     Ok(s.trim().to_owned())
 }
@@ -339,27 +421,40 @@ fn account_dir(data_dir: &Path) -> ictl_sign::AccountDir {
 }
 
 async fn login(data_dir: &Path, email: Option<String>) -> anyhow::Result<()> {
-    println!("建议用一个专门的免费 Apple ID，不要用主账号。");
     println!(
-        "密码和验证码由本程序直接发给苹果；登录时会请求 anisette 服务生成设备标识（默认第三方，可用 ICTL_ANISETTE_URL 改成自建）。"
+        "{}",
+        ictl_l10n::tr!(
+            "建议用一个专门的免费 Apple ID，不要用主账号。",
+            "Use a dedicated free Apple ID, not your main account."
+        )
+    );
+    println!(
+        "{}",
+        ictl_l10n::tr!(
+            "密码和验证码由本程序直接发给苹果；登录时会请求 anisette 服务生成设备标识（默认第三方，可用 ICTL_ANISETTE_URL 改成自建）。",
+            "The password and verification code go straight from this program to Apple; signing in asks an anisette service for device identifiers (a third-party one by default, set ICTL_ANISETTE_URL to use your own)."
+        )
     );
     let email = match email {
         Some(e) => e,
-        None => read_line("Apple ID 邮箱: ")?,
+        None => read_line(ictl_l10n::tr!("Apple ID 邮箱: ", "Apple ID email: "))?,
     };
     if email.is_empty() {
-        bail!("没有输入 Apple ID 邮箱");
+        bail!("{}", ictl_l10n::tr!("没有输入 Apple ID 邮箱", "No Apple ID email entered"));
     }
-    let password = read_secret("密码(输入不显示): ")?;
+    let password = read_secret(ictl_l10n::tr!("密码(输入不显示): ", "Password (hidden): "))?;
     if password.is_empty() {
-        bail!("没有输入密码");
+        bail!("{}", ictl_l10n::tr!("没有输入密码", "No password entered"));
     }
     let two_factor = |req: ictl_sign::TwoFactorRequest| -> Result<ictl_sign::TwoFactorAction, String> {
         let sms = !req.trusted_phone_numbers.is_empty();
         let prompt = match req.method {
-            ictl_sign::TwoFactorMethod::Sms => "短信验证码: ",
-            ictl_sign::TwoFactorMethod::Device if sms => "设备上收到的验证码(输入 sms 改为短信接收): ",
-            ictl_sign::TwoFactorMethod::Device => "设备上收到的验证码: ",
+            ictl_sign::TwoFactorMethod::Sms => ictl_l10n::tr!("短信验证码: ", "SMS code: "),
+            ictl_sign::TwoFactorMethod::Device if sms => ictl_l10n::tr!(
+                "设备上收到的验证码(输入 sms 改为短信接收): ",
+                "Code shown on your device (enter sms to get it by text message): "
+            ),
+            ictl_sign::TwoFactorMethod::Device => ictl_l10n::tr!("设备上收到的验证码: ", "Code shown on your device: "),
         };
         let code = read_line(prompt).map_err(|e| e.to_string())?;
         if sms && code.eq_ignore_ascii_case("sms") {
@@ -368,7 +463,14 @@ async fn login(data_dir: &Path, email: Option<String>) -> anyhow::Result<()> {
         Ok(ictl_sign::TwoFactorAction::SubmitCode(code))
     };
     account_dir(data_dir).login(&email, &password, two_factor).await?;
-    println!("登录成功，会话已保存到 {}", account_dir(data_dir).dir.display());
+    println!(
+        "{}",
+        ictl_l10n::trf!(
+            "登录成功，会话已保存到 {}",
+            "Signed in, session saved to {}",
+            account_dir(data_dir).dir.display()
+        )
+    );
     Ok(())
 }
 
@@ -407,8 +509,21 @@ async fn target_device(socket: &Path, query: Option<&str>) -> anyhow::Result<ict
     }
     match &infos[..] {
         [one] => Ok(one.clone()),
-        [] => bail!("没接设备：用数据线接好并解锁"),
-        _ => bail!("接着 {} 台设备，不知道是哪台：先用 iphone-control select 选一台，或加 --device 指定", infos.len()),
+        [] => bail!(
+            "{}",
+            ictl_l10n::tr!(
+                "没接设备：用数据线接好并解锁",
+                "No device connected: plug it in with a data cable and unlock it"
+            )
+        ),
+        _ => bail!(
+            "{}",
+            ictl_l10n::trf!(
+                "接着 {} 台设备，不知道是哪台：先用 iphone-control select 选一台，或加 --device 指定",
+                "{} devices connected, not sure which one: choose one with iphone-control select, or pass --device",
+                infos.len()
+            )
+        ),
     }
 }
 
@@ -419,30 +534,73 @@ async fn passcode(data_dir: &Path, socket: &Path, action: PasscodeAction) -> any
         PasscodeAction::Clear { all: true, .. } => {
             let _ = std::fs::remove_dir_all(cfg.passcodes_dir());
             let _ = std::fs::remove_file(cfg.legacy_passcode_file());
-            println!("已删除所有设备的锁屏密码，自动解锁关闭。");
+            println!(
+                "{}",
+                ictl_l10n::tr!(
+                    "已删除所有设备的锁屏密码，自动解锁关闭。",
+                    "Deleted the passcodes of all devices, auto-unlock is off."
+                )
+            );
         }
         PasscodeAction::Clear { device, .. } => {
             let d = target_device(socket, device.as_deref()).await?;
             let _ = std::fs::remove_file(cfg.passcode_file_for(&d.udid));
-            println!("已删除 {} 的锁屏密码，这台的自动解锁关闭。", ictl_daemon::core::device_label(&d));
+            println!(
+                "{}",
+                ictl_l10n::trf!(
+                    "已删除 {} 的锁屏密码，这台的自动解锁关闭。",
+                    "Deleted the passcode of {}, auto-unlock is off for it.",
+                    ictl_daemon::core::device_label(&d)
+                )
+            );
         }
         PasscodeAction::Set { device } => {
             let d = target_device(socket, device.as_deref()).await?;
             let path = cfg.passcode_file_for(&d.udid);
-            println!("设备：{}", ictl_daemon::core::device_label(&d));
-            println!("自动解锁：锁屏后，MCP 操作前会用这个密码解锁手机。");
-            println!("风险：能登录这台机器、或能调用这个 MCP 的人，都能解锁你的手机。");
-            println!("保护：每按一位都核对；整串输完仍锁着就停用自动解锁并推送通知，不会累计输错。只支持纯数字。");
-            let p = read_secret("锁屏密码(输入不显示): ")?;
+            println!("{}", ictl_l10n::trf!("设备：{}", "Device: {}", ictl_daemon::core::device_label(&d)));
+            println!(
+                "{}",
+                ictl_l10n::tr!(
+                    "自动解锁：锁屏后，MCP 操作前会用这个密码解锁手机。",
+                    "Auto-unlock: when the phone is locked, MCP actions use this passcode to unlock it first."
+                )
+            );
+            println!(
+                "{}",
+                ictl_l10n::tr!(
+                    "风险：能登录这台机器、或能调用这个 MCP 的人，都能解锁你的手机。",
+                    "Risk: anyone who can log in to this machine or call this MCP server can unlock your phone."
+                )
+            );
+            println!(
+                "{}",
+                ictl_l10n::tr!(
+                    "保护：每按一位都核对；整串输完仍锁着就停用自动解锁并推送通知，不会累计输错。只支持纯数字。",
+                    "Safeguards: every digit is checked; if the phone is still locked after the whole passcode, auto-unlock is disabled and a notification is sent, so wrong attempts don't pile up. Numeric passcodes only."
+                )
+            );
+            let p = read_secret(ictl_l10n::tr!("锁屏密码(输入不显示): ", "Passcode (hidden): "))?;
             if p.len() < 4 || !p.bytes().all(|b| b.is_ascii_digit()) {
-                bail!("只支持 4 位以上的纯数字密码");
+                bail!(
+                    "{}",
+                    ictl_l10n::tr!(
+                        "只支持 4 位以上的纯数字密码",
+                        "Only numeric passcodes with 4 or more digits are supported"
+                    )
+                );
             }
             cfg.ensure_passcodes_dir()?;
             let mut f = std::fs::OpenOptions::new().create(true).write(true).truncate(true).mode(0o600).open(&path)?;
             // mode() 只在新建时生效：已有文件也收紧
             f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
             f.write_all(p.as_bytes())?;
-            println!("已保存（只用于这台设备）。别忘了在手机上把「自动锁定」从「永不」改回较短时间。");
+            println!(
+                "{}",
+                ictl_l10n::tr!(
+                    "已保存（只用于这台设备）。别忘了在手机上把「自动锁定」从「永不」改回较短时间。",
+                    "Saved (for this device only). Remember to set Auto-Lock on the phone back from “Never” to a shorter time."
+                )
+            );
         }
     }
     Ok(())
@@ -469,27 +627,41 @@ where
 async fn setup(cli: &Cli) -> anyhow::Result<()> {
     use ictl_device::{Device, DeviceError};
     let socket = &cli.socket;
-    snapshot(socket).await.context("setup 需要守护进程在运行")?;
+    snapshot(socket)
+        .await
+        .context(ictl_l10n::tr!("setup 需要守护进程在运行", "setup needs the daemon to be running"))?;
 
-    println!("[1/6] 等待手机连接");
+    println!("{}", ictl_l10n::tr!("[1/6] 等待手机连接", "[1/6] Waiting for the phone"));
     let found = wait_until(Duration::from_secs(600), Duration::from_secs(5), || async {
         ictl_device::list_devices().await.map(|d| !d.is_empty()).unwrap_or(false)
     })
     .await;
     if !found {
-        bail!("10 分钟内没检测到手机：用数据线接好并解锁手机");
+        bail!(
+            "{}",
+            ictl_l10n::tr!(
+                "10 分钟内没检测到手机：用数据线接好并解锁手机",
+                "No phone detected within 10 minutes: plug it in with a data cable and unlock it"
+            )
+        );
     }
     // 和守护进程控制同一台：第 5 步的签名安装是守护进程对它正在控制的那台做的
     let target = target_device(socket, None).await?;
     let udid = Some(target.udid.clone());
     let device = Device::find(udid.as_deref()).await?;
-    println!("  手机 {}", ictl_daemon::core::device_label(&target));
+    println!("{}", ictl_l10n::trf!("  手机 {}", "  Phone {}", ictl_daemon::core::device_label(&target)));
 
-    println!("[2/6] 配对");
+    println!("{}", ictl_l10n::tr!("[2/6] 配对", "[2/6] Pairing"));
     if device.paired().await? {
-        println!("  已配对");
+        println!("{}", ictl_l10n::tr!("  已配对", "  Already paired"));
     } else {
-        println!("  手机上会弹出「要信任此电脑吗?」:点「信任」,再输入锁屏密码。");
+        println!(
+            "{}",
+            ictl_l10n::tr!(
+                "  手机上会弹出「要信任此电脑吗?」:点「信任」,再输入锁屏密码。",
+                "  The phone shows “Trust This Computer?”: tap “Trust” and enter the passcode."
+            )
+        );
         let ok = wait_until(Duration::from_secs(300), Duration::from_secs(5), || async {
             match device.pair("iphone-control").await {
                 Ok(()) => true,
@@ -502,18 +674,30 @@ async fn setup(cli: &Cli) -> anyhow::Result<()> {
         })
         .await;
         if !ok {
-            bail!("5 分钟内没完成配对");
+            bail!("{}", ictl_l10n::tr!("5 分钟内没完成配对", "Pairing not completed within 5 minutes"));
         }
-        println!("  配对成功");
+        println!("{}", ictl_l10n::tr!("  配对成功", "  Paired"));
     }
 
-    println!("[3/6] 开发者模式");
+    println!("{}", ictl_l10n::tr!("[3/6] 开发者模式", "[3/6] Developer Mode"));
     if device.developer_mode_enabled().await.unwrap_or(false) {
-        println!("  已打开");
+        println!("{}", ictl_l10n::tr!("  已打开", "  Already on"));
     } else {
         let _ = device.reveal_developer_mode().await;
-        println!("  请在手机上:设置 → 隐私与安全性 → 开发者模式 → 打开 → 重新启动;");
-        println!("  重启后解锁,在弹窗里点「打开」并输入密码。手机重启期间连接会断开,会自动恢复。");
+        println!(
+            "{}",
+            ictl_l10n::tr!(
+                "  请在手机上:设置 → 隐私与安全性 → 开发者模式 → 打开 → 重新启动;",
+                "  On the phone: Settings → Privacy & Security → Developer Mode → on → Restart;"
+            )
+        );
+        println!(
+            "{}",
+            ictl_l10n::tr!(
+                "  重启后解锁,在弹窗里点「打开」并输入密码。手机重启期间连接会断开,会自动恢复。",
+                "  after the restart, unlock it, tap “Turn On” in the prompt and enter the passcode. The connection drops while the phone restarts and recovers by itself."
+            )
+        );
         let ok = wait_until(Duration::from_secs(900), Duration::from_secs(10), || async {
             match Device::find(udid.as_deref()).await {
                 Ok(d) => d.developer_mode_enabled().await.unwrap_or(false),
@@ -522,18 +706,27 @@ async fn setup(cli: &Cli) -> anyhow::Result<()> {
         })
         .await;
         if !ok {
-            bail!("15 分钟内没检测到开发者模式打开");
+            bail!(
+                "{}",
+                ictl_l10n::tr!("15 分钟内没检测到开发者模式打开", "Developer Mode not turned on within 15 minutes")
+            );
         }
-        println!("  已打开");
+        println!("{}", ictl_l10n::tr!("  已打开", "  Turned on"));
     }
 
-    println!("[4/6] 登录 Apple ID");
+    println!("{}", ictl_l10n::tr!("[4/6] 登录 Apple ID", "[4/6] Apple ID sign-in"));
     match account_dir(&cli.data_dir).selected_email().await {
-        Ok(e) => println!("  已登录 {e}"),
+        Ok(e) => println!("{}", ictl_l10n::trf!("  已登录 {e}", "  Signed in as {e}")),
         Err(_) => login(&cli.data_dir, None).await?,
     }
 
-    println!("[5/6] 注册设备、签名 WDA 并安装到手机（手机要保持解锁）");
+    println!(
+        "{}",
+        ictl_l10n::tr!(
+            "[5/6] 注册设备、签名 WDA 并安装到手机（手机要保持解锁）",
+            "[5/6] Registering the device, signing WDA and installing it on the phone (keep the phone unlocked)"
+        )
+    );
     // 前几步直接问 usbmuxd，重签却由守护进程做：它每 10 秒巡检一次才认到手机。手机刚重启完、usbmuxd 刚重启时
     // 这里会先看到手机，马上请求重签就报「手机未连接」，所以先等守护进程认到同一台
     let target = device.udid.clone();
@@ -544,23 +737,67 @@ async fn setup(cli: &Cli) -> anyhow::Result<()> {
     })
     .await;
     if !seen {
-        bail!("守护进程 1 分钟内没认到手机 {}，运行 iphone-control doctor 看看卡在哪", device.udid);
+        bail!(
+            "{}",
+            ictl_l10n::trf!(
+                "守护进程 1 分钟内没认到手机 {}，运行 iphone-control doctor 看看卡在哪",
+                "The daemon didn't pick up the phone {} within a minute; run iphone-control doctor to see where it is stuck",
+                device.udid
+            )
+        );
     }
     print_text(socket, Request::Resign { force: true }).await?;
 
-    println!("[6/6] 等待 WDA 启动");
-    println!("  首次安装:在手机 设置 → 通用 → VPN 与设备管理 里找到你的 Apple ID,点「信任」(需要联网)。");
-    println!("  如果弹出「为 XCTest 输入 iPhone 密码」,输入锁屏密码。");
+    println!("{}", ictl_l10n::tr!("[6/6] 等待 WDA 启动", "[6/6] Waiting for WDA to start"));
+    println!(
+        "{}",
+        ictl_l10n::tr!(
+            "  首次安装:在手机 设置 → 通用 → VPN 与设备管理 里找到你的 Apple ID,点「信任」(需要联网)。",
+            "  First install: on the phone, open Settings → General → VPN & Device Management, find your Apple ID and tap “Trust” (needs internet)."
+        )
+    );
+    println!(
+        "{}",
+        ictl_l10n::tr!(
+            "  如果弹出「为 XCTest 输入 iPhone 密码」,输入锁屏密码。",
+            "  If “Enter iPhone passcode for XCTest” appears, enter the passcode."
+        )
+    );
     let ready = wait_until(Duration::from_secs(600), Duration::from_secs(10), || async {
         snapshot(socket).await.map(|s| s.state == ictl_daemon::machine::DeviceState::Ready).unwrap_or(false)
     })
     .await;
-    println!("  {}", if ready { "WDA 就绪" } else { "10 分钟内 WDA 没就绪,运行 iphone-control doctor 看看卡在哪" });
+    println!(
+        "  {}",
+        if ready {
+            ictl_l10n::tr!("WDA 就绪", "WDA ready")
+        } else {
+            ictl_l10n::tr!(
+                "10 分钟内 WDA 没就绪,运行 iphone-control doctor 看看卡在哪",
+                "WDA wasn't ready within 10 minutes; run iphone-control doctor to see where it is stuck"
+            )
+        }
+    );
 
-    println!("\n可选设置");
-    println!("  通知:填 TG_* 或 BARK_*(容器部署在 .env 里,然后重建容器;从源码运行在守护进程的环境文件里,然后重启它)");
-    println!("  自动解锁:iphone-control passcode set");
-    println!("  注册到 Claude Code:iphone-control mcp-config");
+    println!("{}", ictl_l10n::tr!("\n可选设置", "\nOptional"));
+    println!(
+        "{}",
+        ictl_l10n::tr!(
+            "  通知:填 TG_* 或 BARK_*(容器部署在 .env 里,然后重建容器;从源码运行在守护进程的环境文件里,然后重启它)",
+            "  Notifications: set TG_* or BARK_* (container: in .env, then recreate the container; source install: in the daemon's env file, then restart it)"
+        )
+    );
+    println!(
+        "{}",
+        ictl_l10n::tr!("  自动解锁:iphone-control passcode set", "  Auto-unlock: iphone-control passcode set")
+    );
+    println!(
+        "{}",
+        ictl_l10n::tr!(
+            "  注册到 Claude Code:iphone-control mcp-config",
+            "  Register with Claude Code: iphone-control mcp-config"
+        )
+    );
     println!();
     print_text(socket, Request::Doctor).await
 }
@@ -573,14 +810,27 @@ async fn wda_bridge(socket: &Path, port: u16) -> anyhow::Result<()> {
     let target = target_device(socket, None).await?;
     let device = ictl_device::Device::find(Some(&target.udid)).await?;
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
-    println!("WDA 桥接 127.0.0.1:{port} → 手机 {} 的 8100 端口（Ctrl-C 停止）", device.udid);
-    println!("注意：本机所有用户都能经这个端口控制手机（WDA 没有认证），用完就停掉。");
+    println!(
+        "{}",
+        ictl_l10n::trf!(
+            "WDA 桥接 127.0.0.1:{port} → 手机 {} 的 8100 端口（Ctrl-C 停止）",
+            "WDA bridge 127.0.0.1:{port} → port 8100 on phone {} (Ctrl-C to stop)",
+            device.udid
+        )
+    );
+    println!(
+        "{}",
+        ictl_l10n::tr!(
+            "注意：本机所有用户都能经这个端口控制手机（WDA 没有认证），用完就停掉。",
+            "Note: every user on this machine can control the phone through this port (WDA has no authentication); stop it when you're done."
+        )
+    );
     loop {
         let (client, _) = listener.accept().await?;
         let device = device.clone();
         tokio::spawn(async move {
             if let Err(e) = bridge_conn(client, &device).await {
-                tracing::warn!("桥接连接出错：{e}");
+                tracing::warn!("{}", ictl_l10n::trf!("桥接连接出错：{e}", "Bridge connection error: {e}"));
             }
         });
     }
@@ -594,7 +844,7 @@ async fn bridge_conn(mut client: tokio::net::TcpStream, device: &ictl_device::De
     let mut buf = [0u8; 4096];
     while !head.windows(4).any(|w| w == b"\r\n\r\n") {
         if head.len() > 64 * 1024 {
-            bail!("请求头太长");
+            bail!("{}", ictl_l10n::tr!("请求头太长", "request headers too long"));
         }
         let n = client.read(&mut buf).await?;
         if n == 0 {

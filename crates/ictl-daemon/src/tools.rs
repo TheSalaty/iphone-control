@@ -13,7 +13,7 @@ use ictl_wda::{Launch, WdaClient, WdaError};
 use crate::core::{Daemon, Inner, drop_tunnel, hid_supported, wda_down};
 use crate::imaging::{self, fmt_g};
 use crate::notify::Event;
-use crate::protocol::{ALERT_BLOCKING, Response, TAP_MISSED};
+use crate::protocol::{ALERT_BLOCKING, ALERT_BLOCKING_EN, Response, tap_missed_prefixes};
 
 /// 锁屏后至少等这么久再自动解锁：锁屏过渡没走完就唤醒，WDA 第一下上滑卡约 16 秒后报 `point.x != INFINITY`
 pub(crate) const LOCK_SETTLE: Duration = Duration::from_secs(3);
@@ -30,6 +30,8 @@ const STILL_TOLERANCE: i64 = 3;
 const SCROLL_SETTLE: Duration = Duration::from_millis(2500);
 /// WDA 不可用时 status 里说明哪些功能用不了
 const NEEDS_WDA: &str = "读界面元素、按名字点击、启动 App、输入中文要等 WDA 恢复";
+const NEEDS_WDA_EN: &str =
+    "reading elements, tapping by text, launching apps and typing non-ASCII text wait until WDA is back";
 /// 按 Home 后最多等这么久，确认主屏到了前台（iPhone 12 mini 上 IOHID 的 Home 约 1.3～1.5 秒）
 const HOME_SETTLE: Duration = Duration::from_secs(2);
 /// 按电源键后最多等这么久，等 WDA 报锁屏（iPhone 12 mini 实测约 1 秒）
@@ -47,11 +49,11 @@ impl Daemon {
             Ok(_) => Ok(()),
             Err(e @ (UnlockError::WrongPasscode | UnlockError::Uncertain(_))) => {
                 self.notify(g, Event::UnlockDisabled);
-                Err(format!("{e},已推送通知"))
+                Err(ictl_l10n::trf!("{e},已推送通知", "{e}, notification sent"))
             }
             Err(UnlockError::NoPasscode) if self.cfg.legacy_passcode_file().is_file() => {
-                Err("手机已锁屏,需要人工解锁:旧版本保存的锁屏密码没记是哪台设备的,同时接着几台时不会用它;\
-在这台设备连着时运行 iphone-control passcode set 重新设置"
+                Err(ictl_l10n::tr!("手机已锁屏,需要人工解锁:旧版本保存的锁屏密码没记是哪台设备的,同时接着几台时不会用它;\
+在这台设备连着时运行 iphone-control passcode set 重新设置", "The phone is locked and has to be unlocked by hand: the passcode saved by an older version has no device, and it isn't used while several devices are connected; run iphone-control passcode set while this device is connected to set it again")
                     .into())
             }
             Err(e) => Err(e.to_string()),
@@ -74,7 +76,7 @@ impl Daemon {
             .screen
             .filter(|_| same)
             .or(self.cfg.screen_fallback)
-            .ok_or_else(|| "WDA 不可用,也不知道屏幕尺寸;等 WDA 起来一次,或在 .env 里设 SCREEN_W/SCREEN_H".into())
+            .ok_or_else(|| ictl_l10n::tr!("WDA 不可用,也不知道屏幕尺寸;等 WDA 起来一次,或在 .env 里设 SCREEN_W/SCREEN_H", "WDA is unavailable and the screen size is unknown; wait for WDA to start once, or set SCREEN_W/SCREEN_H in .env").into())
     }
 
     /// 记下 WDA 报的界面旋转角：WDA 挂了以后 HID 点击要靠它换算横屏坐标（约 20 毫秒）
@@ -90,15 +92,21 @@ impl Daemon {
     /// 截图只给宽高，不能分辨横屏左右；短暂掉线时借用近期 WDA 方向，过期或不匹配就不触摸。
     async fn hid_touch_rotation(&self, g: &mut Inner) -> Result<Rotation, String> {
         self.refresh_hid_rotation(g).await;
-        let png = self.hid_screenshot(g).await.map_err(|e| format!("核对 HID 方向失败，没有发送触摸：{e}"))?;
-        let (w, h) = imaging::png_size(&png).ok_or("无法读取截图尺寸，没有发送触摸")?;
+        let png = self.hid_screenshot(g).await.map_err(|e| {
+            ictl_l10n::trf!(
+                "核对 HID 方向失败，没有发送触摸：{e}",
+                "Checking the HID orientation failed, no touch sent: {e}"
+            )
+        })?;
+        let (w, h) = imaging::png_size(&png)
+            .ok_or(ictl_l10n::tr!("无法读取截图尺寸，没有发送触摸", "Can't read the screenshot size, no touch sent"))?;
         let known = g.wda_rotation.map(|(at, r)| (at.elapsed(), r));
         hid_rotation(w, h, known)
     }
 
     /// 经隧道截图（WDA 不可用时）。失败就丢掉隧道，下次重建
     async fn hid_screenshot(&self, g: &mut Inner) -> Result<Vec<u8>, String> {
-        let device = g.device.clone().ok_or("手机未连接")?;
+        let device = g.device.clone().ok_or(ictl_l10n::tr!("手机未连接", "Phone not connected"))?;
         let t = self.ensure_tunnel(g, &device).await.map_err(|e| e.to_string())?;
         match t.screenshot_png().await {
             Ok(p) => Ok(p),
@@ -116,13 +124,16 @@ impl Daemon {
             return Err(wda_down(&g.state, g.info.as_ref()));
         }
         let screen = self.screen(g).await?;
-        let device = g.device.clone().ok_or("手机未连接")?;
+        let device = g.device.clone().ok_or(ictl_l10n::tr!("手机未连接", "Phone not connected"))?;
         // HID 触摸按设备竖放的坐标归一化
         let screen = screen.portrait();
-        let t = self.ensure_tunnel(g, &device).await.map_err(|e| format!("HID 后备路线不可用：{e}"))?;
+        let t = self
+            .ensure_tunnel(g, &device)
+            .await
+            .map_err(|e| ictl_l10n::trf!("HID 后备路线不可用：{e}", "HID fallback unavailable: {e}"))?;
         if let Err(e) = t.hid(screen).await {
             drop_tunnel(g).await;
-            return Err(format!("HID 后备路线不可用：{e}"));
+            return Err(ictl_l10n::trf!("HID 后备路线不可用：{e}", "HID fallback unavailable: {e}"));
         }
         // 第二次调用直接返回已开好的会话（这样写是为了绕开借用检查对条件返回的限制）
         g.tunnel.as_mut().expect("刚建好").hid(screen).await.map_err(|e| e.to_string())
@@ -143,7 +154,7 @@ impl Daemon {
             Err(e @ DeviceError::InvalidInput(_)) => Err(e.to_string()),
             Err(e) => {
                 drop_tunnel(g).await;
-                Err(format!("HID 命令失败: {e}"))
+                Err(ictl_l10n::trf!("HID 命令失败: {e}", "HID command failed: {e}"))
             }
         }
     }
@@ -159,32 +170,48 @@ impl Daemon {
             .map(crate::core::device_label)
             .collect();
         let how = if self.cfg.udid.is_some() {
-            "(IPHONE_UDID 固定了设备,要换先改 .env)"
+            ictl_l10n::tr!(
+                "(IPHONE_UDID 固定了设备,要换先改 .env)",
+                " (IPHONE_UDID pins the device; change .env to switch)"
+            )
         } else {
-            ";用 iphone_select_device 切换"
+            ictl_l10n::tr!(";用 iphone_select_device 切换", "; switch with iphone_select_device")
         };
         match (current, &pinned) {
-            (None, Some(p)) => Some(format!(
+            (None, Some(p)) => Some(ictl_l10n::trf!(
                 "设备: 选定的 {p} 没连接{}{how}",
-                if others.is_empty() { String::new() } else { format!(",接着的有 {}", others.join("、")) }
+                "Device: the selected {p} is not connected{}{how}",
+                if others.is_empty() {
+                    String::new()
+                } else {
+                    ictl_l10n::trf!(",接着的有 {}", ", connected are {}", others.join(ictl_l10n::tr!("、", ", ")))
+                }
             )),
             (Some(_), _) if !others.is_empty() => {
                 let me = g.info.as_ref().map(crate::core::device_label).unwrap_or_default();
-                let mode = if pinned.is_some() { "选定" } else { "自动选" };
-                Some(format!("设备: 正在控制 {me}({mode});另外接着 {}{how}", others.join("、")))
+                let mode = if pinned.is_some() {
+                    ictl_l10n::tr!("选定", "selected")
+                } else {
+                    ictl_l10n::tr!("自动选", "automatic")
+                };
+                Some(ictl_l10n::trf!(
+                    "设备: 正在控制 {me}({mode});另外接着 {}{how}",
+                    "Device: controlling {me} ({mode}); also connected {}{how}",
+                    others.join(ictl_l10n::tr!("、", ", "))
+                ))
             }
             _ => None,
         }
     }
 
     pub(crate) async fn status_text(&self, g: &mut Inner) -> String {
-        let mut daemon_line = format!("守护进程: {}", g.state.describe());
+        let mut daemon_line = ictl_l10n::trf!("守护进程: {}", "Daemon: {}", g.state.describe());
         if let Some(l) = self.devices_line(g) {
             daemon_line = format!("{l}\n{daemon_line}");
         }
         let unlock = self.unlock_cfg(g.device.as_ref().map(|d| d.udid.as_str()));
         let Some(w) = self.wda(g) else {
-            return format!("{}\n{NEEDS_WDA}\n{daemon_line}", wda_down(&g.state, g.info.as_ref()));
+            return format!("{}\n{}\n{daemon_line}", wda_down(&g.state, g.info.as_ref()), needs_wda());
         };
         let r: Result<String, WdaError> = async {
             let ready = w.ready().await?;
@@ -193,22 +220,21 @@ impl Daemon {
             let check = w.check_lock(None, false).await?;
             let locked = check.locked;
             let mut lock = if check.uncertain {
-                "可能已锁屏(屏幕上是锁屏样式的界面,WDA 说没锁;配置了自动解锁时操作前会先尝试解锁)".to_owned()
+                ictl_l10n::tr!("可能已锁屏(屏幕上是锁屏样式的界面,WDA 说没锁;配置了自动解锁时操作前会先尝试解锁)", "possibly locked (the screen looks like the lock screen though WDA says unlocked; with auto-unlock configured, actions try to unlock first)").to_owned()
             } else if !locked {
-                "未锁屏".to_owned()
+                ictl_l10n::tr!("未锁屏", "unlocked").to_owned()
             } else if unlock.disabled_by_failure() {
-                "已锁屏(自动解锁之前失败过已停用,需要人工解锁,核对密码后运行 iphone-control unlock-reset)".to_owned()
+                ictl_l10n::tr!("已锁屏(自动解锁之前失败过已停用,需要人工解锁,核对密码后运行 iphone-control unlock-reset)", "locked (auto-unlock was disabled after an earlier failure; unlock by hand, check the passcode, then run iphone-control unlock-reset)").to_owned()
             } else if unlock.enabled() {
-                "已锁屏(操作时会自动解锁)".to_owned()
+                ictl_l10n::tr!("已锁屏(操作时会自动解锁)", "locked (actions unlock automatically)").to_owned()
             } else {
-                "已锁屏(未配置自动解锁,需要人工解锁)".to_owned()
+                ictl_l10n::tr!("已锁屏(未配置自动解锁,需要人工解锁)", "locked (no auto-unlock configured; unlock by hand)").to_owned()
             };
             if !locked && unlock.disabled_by_failure() {
-                lock += ";自动解锁已停用";
+                lock += ictl_l10n::tr!(";自动解锁已停用", "; auto-unlock disabled");
             }
             let ready = if ready { "True" } else { "False" };
-            Ok(format!(
-                "WDA 就绪: {ready}\n锁屏: {lock}\n前台 App: {app}\n屏幕: {}x{} 点",
+            Ok(ictl_l10n::trf!("WDA 就绪: {ready}\n锁屏: {lock}\n前台 App: {app}\n屏幕: {}x{} 点", "WDA ready: {ready}\nLocked: {lock}\nForeground app: {app}\nScreen: {}x{} points",
                 fmt_g(s.width),
                 fmt_g(s.height)
             ))
@@ -216,7 +242,7 @@ impl Daemon {
         .await;
         match r {
             Ok(t) => format!("{t}\n{daemon_line}"),
-            Err(e) => format!("{e}\n{NEEDS_WDA}\n{daemon_line}"),
+            Err(e) => format!("{e}\n{}\n{daemon_line}", needs_wda()),
         }
     }
 
@@ -240,17 +266,26 @@ impl Daemon {
                 if !hid_supported(g.info.as_ref()) {
                     return Err(wda_down(&g.state, g.info.as_ref()));
                 }
-                (self.hid_screenshot(g).await.map_err(|e| format!("HID 命令失败: {e}"))?, "HID")
+                (
+                    self.hid_screenshot(g)
+                        .await
+                        .map_err(|e| ictl_l10n::trf!("HID 命令失败: {e}", "HID command failed: {e}"))?,
+                    "HID",
+                )
             }
         };
         let screen = self.screen(g).await?;
         // 解码、缩放、JPEG 编码是 CPU 活（1290×2796），放到阻塞线程，不卡住主循环
-        let (jpeg, caption) = tokio::task::spawn_blocking(move || match region {
-            None => imaging::full_screen(&png, screen, via),
-            Some(r) => imaging::region(&png, screen, r, via),
+        // 说明文字在阻塞线程里生成：带上这个请求的语言
+        let lang = ictl_l10n::lang();
+        let (jpeg, caption) = tokio::task::spawn_blocking(move || {
+            ictl_l10n::with_lang(lang, || match region {
+                None => imaging::full_screen(&png, screen, via),
+                Some(r) => imaging::region(&png, screen, r, via),
+            })
         })
         .await
-        .map_err(|e| format!("图像处理任务异常：{e}"))??;
+        .map_err(|e| ictl_l10n::trf!("图像处理任务异常：{e}", "Image processing task failed: {e}"))??;
         Ok(Response::Image { jpeg_base64: base64::engine::general_purpose::STANDARD.encode(jpeg), caption })
     }
 
@@ -280,7 +315,11 @@ impl Daemon {
             if filter.is_empty() { els.iter().collect() } else { elements::filter(&els, filter) };
         let lines: Vec<_> = shown.iter().take(limit).map(|e| e.describe()).collect();
         let more = if shown.len() > limit {
-            format!("\n……另有 {} 个未列出,可用 filter 缩小范围", shown.len() - limit)
+            ictl_l10n::trf!(
+                "\n……另有 {} 个未列出,可用 filter 缩小范围",
+                "\n…{} more not listed, narrow it down with filter",
+                shown.len() - limit
+            )
         } else {
             String::new()
         };
@@ -298,7 +337,7 @@ impl Daemon {
         let t0 = Instant::now();
         let Some(w) = self.wda(g) else {
             tokio::time::sleep(max.min(Duration::from_millis(500))).await;
-            return Ok("WDA 不可用,等了 0.5 秒".into());
+            return Ok(ictl_l10n::tr!("WDA 不可用,等了 0.5 秒", "WDA unavailable, waited 0.5 s").into());
         };
         w.begin_polling().await.map_err(|e| e.to_string())?;
         let r = poll_stable(w, t0, max).await;
@@ -313,7 +352,9 @@ impl Daemon {
         // 自己画的加载圈（不是 ActivityIndicator）不在树里，树稳定了页面可能还在加载。
         // 加载中的页面中间是空的：只在这种时候多看一眼画面（约 0.5 秒），平常不多花时间
         let screen = self.screen(g).await?;
-        let msg = if msg.starts_with("界面已稳定") && middle_is_empty(&tree, screen.height) {
+        let msg = if msg.starts_with(ictl_l10n::tr!("界面已稳定", "Screen settled"))
+            && middle_is_empty(&tree, screen.height)
+        {
             msg + &self.motion_note(g).await
         } else {
             msg
@@ -334,16 +375,27 @@ impl Daemon {
                 let m = imaging::thumb_motion(p, &cur);
                 if m.mean < VISUAL_STILL {
                     let local = if m.max_tile >= LOCAL_MOTION && imaging::mostly_blank(&cur) {
-                        ";但有一小块还在动(可能是加载圈或小动画),内容可能还没加载完,要等结果用 iphone_wait_for 或稍后再截图"
+                        ictl_l10n::tr!(
+                            ";但有一小块还在动(可能是加载圈或小动画),内容可能还没加载完,要等结果用 iphone_wait_for 或稍后再截图",
+                            "; but a small area is still moving (perhaps a spinner or a small animation), content may still be loading; to wait for a result use iphone_wait_for or take a screenshot later"
+                        )
                     } else {
                         ""
                     };
-                    return Ok(format!("画面已静止({:.1} 秒){local}", t0.elapsed().as_secs_f64()));
+                    return Ok(ictl_l10n::trf!(
+                        "画面已静止({:.1} 秒){local}",
+                        "Picture still ({:.1} s){local}",
+                        t0.elapsed().as_secs_f64()
+                    ));
                 }
             }
             // 不够再截一张（约 0.2 秒）、隔一下再比的时间了
             if deadline.saturating_duration_since(Instant::now()) < Duration::from_millis(300) {
-                return Ok(format!("{:.1} 秒内画面一直在动,按最后的状态返回", max.as_secs_f64()));
+                return Ok(ictl_l10n::trf!(
+                    "{:.1} 秒内画面一直在动,按最后的状态返回",
+                    "The picture kept moving for {:.1} s, returning the last state",
+                    max.as_secs_f64()
+                ));
             }
             prev = Some(cur);
             tokio::time::sleep(Duration::from_millis(150)).await;
@@ -364,7 +416,7 @@ impl Daemon {
         }
         let m = imaging::thumb_motion(&thumbs[0], &thumbs[1]);
         if (m.mean >= VISUAL_STILL || m.max_tile >= LOCAL_MOTION) && imaging::mostly_blank(&thumbs[1]) {
-            ";但画面中间是空的、还有东西在动(可能还在加载),要等结果用 iphone_wait_for 或稍后再截图".into()
+            ictl_l10n::tr!(";但画面中间是空的、还有东西在动(可能还在加载),要等结果用 iphone_wait_for 或稍后再截图", "; but the middle of the screen is empty and something is still moving (perhaps still loading); to wait for a result use iphone_wait_for or take a screenshot later").into()
         } else {
             String::new()
         }
@@ -396,10 +448,10 @@ impl Daemon {
                 let els = w.elements().await.map_err(|e| e.to_string())?;
                 // 不算输入框里的字：刚输入的搜索词不能算「结果出来了」
                 if let Some(e) = elements::find_shown(&els, text).first() {
-                    return Ok(format!("已出现 {}({:.1} 秒)", e.describe(), t0.elapsed().as_secs_f64()));
+                    return Ok(ictl_l10n::trf!("已出现 {}({:.1} 秒)", "Appeared: {} ({:.1} s)", e.describe(), t0.elapsed().as_secs_f64()));
                 }
                 if t0.elapsed() >= timeout {
-                    return Err(format!("{:.0} 秒内没出现包含 \"{text}\" 的元素,截图看看屏幕", timeout.as_secs_f64()));
+                    return Err(ictl_l10n::trf!("{:.0} 秒内没出现包含 \"{text}\" 的元素,截图看看屏幕", "No element containing \"{text}\" appeared within {:.0} s; take a screenshot to look at the screen", timeout.as_secs_f64()));
                 }
                 tokio::time::sleep(Duration::from_millis(300)).await;
             }
@@ -415,7 +467,7 @@ impl Daemon {
         if let Some(w) = self.wda(g) {
             // 只有连不上才退到 HID；超时说明请求已发出，再用 HID 做一遍可能点两次
             match w.tap(x, y).await {
-                Ok(()) => return Ok(format!("已点击 {pos}")),
+                Ok(()) => return Ok(ictl_l10n::trf!("已点击 {pos}", "Tapped {pos}")),
                 Err(WdaError::Unavailable(_)) => {}
                 Err(e) => return Err(e.to_string()),
             }
@@ -428,7 +480,7 @@ impl Daemon {
             })
         })
         .await?;
-        Ok(format!("已点击 {pos}(经 HID)"))
+        Ok(ictl_l10n::trf!("已点击 {pos}(经 HID)", "Tapped {pos} (via HID)"))
     }
 
     pub(crate) async fn tap_element(
@@ -442,40 +494,57 @@ impl Daemon {
         let tree = self.tree(g, max_age).await?;
         let matches = elements::find(&tree.elements, text);
         if matches.is_empty() {
-            return Ok(format!("{}包含 \"{text}\" 的元素,先用 iphone_list_elements 或截图看看屏幕", TAP_MISSED[0]));
+            return Ok(ictl_l10n::trf!(
+                "{}包含 \"{text}\" 的元素,先用 iphone_list_elements 或截图看看屏幕",
+                "{}: no element contains \"{text}\"; look at the screen with iphone_list_elements or a screenshot first",
+                tap_missed_prefixes()[0]
+            ));
         }
         if index >= matches.len() {
             let list: Vec<_> = matches.iter().map(|e| e.describe()).collect();
-            return Ok(format!("{} {} 个:\n{}", TAP_MISSED[1], matches.len(), list.join("\n")));
+            return Ok(ictl_l10n::trf!(
+                "{} {} 个:\n{}",
+                "{} {} (index out of range):\n{}",
+                tap_missed_prefixes()[1],
+                matches.len(),
+                list.join("\n")
+            ));
         }
         let e = matches[index];
         // 中心被悬浮栏、键盘、浮层之类盖住时，点上去会落在盖着的东西上
         let ((x, y), moved) = match tree.tap_point(e) {
             TapPoint::Center(p) => (p, String::new()),
-            TapPoint::Moved { at, by } => {
-                (at, format!(";它的中心被「{by}」盖住,改点没被盖住的 ({},{})", fmt_g(at.0), fmt_g(at.1)))
-            }
+            TapPoint::Moved { at, by } => (
+                at,
+                ictl_l10n::trf!(
+                    ";它的中心被「{by}」盖住,改点没被盖住的 ({},{})",
+                    "; its center is covered by “{by}”, tapped an uncovered part at ({},{}) instead",
+                    fmt_g(at.0),
+                    fmt_g(at.1)
+                ),
+            ),
             TapPoint::Covered { by } => {
-                return Ok(format!(
+                return Ok(ictl_l10n::trf!(
                     "{}:{} 整个被「{by}」盖住,没有点;先滑动让它露出来,或截图后按坐标点",
-                    TAP_MISSED[2],
+                    "{}: {} is completely covered by “{by}”, not tapped; scroll to reveal it first, or tap by coordinates from a screenshot",
+                    tap_missed_prefixes()[2],
                     e.describe()
                 ));
             }
         };
         self.require_wda(g)?.tap(x, y).await.map_err(|e| e.to_string())?;
         let note = if matches.len() > 1 {
-            format!("(共匹配 {} 个,点的是第 {index} 个)", matches.len())
+            ictl_l10n::trf!("(共匹配 {} 个,点的是第 {index} 个)", " ({} matches, tapped number {index})", matches.len())
         } else {
             String::new()
         };
-        Ok(format!("已点击 {}{note}{moved}", e.describe()))
+        Ok(ictl_l10n::trf!("已点击 {}{note}{moved}", "Tapped {}{note}{moved}", e.describe()))
     }
 
     pub(crate) async fn long_press(&self, g: &mut Inner, x: f64, y: f64, seconds: f64) -> Result<String, String> {
         self.ensure_unlocked(g).await?;
         self.require_wda(g)?.touch_and_hold(x, y, seconds).await.map_err(|e| e.to_string())?;
-        Ok(format!("已长按 ({},{}) {} 秒", fmt_g(x), fmt_g(y), fmt_g(seconds)))
+        Ok(ictl_l10n::trf!("已长按 ({},{}) {} 秒", "Long-pressed ({},{}) for {} s", fmt_g(x), fmt_g(y), fmt_g(seconds)))
     }
 
     pub(crate) async fn swipe(
@@ -493,7 +562,7 @@ impl Daemon {
                 // 列表还在滚时下一次点击只会让它停住，点不到东西
                 Ok(()) => {
                     let vertical = (to.1 - from.1).abs() >= (to.0 - from.0).abs();
-                    return Ok(format!("已滑动 {desc}{}", wait_scrolled(w, vertical).await));
+                    return Ok(ictl_l10n::trf!("已滑动 {desc}{}", "Swiped {desc}{}", wait_scrolled(w, vertical).await));
                 }
                 Err(WdaError::Unavailable(_)) => {}
                 Err(e) => return Err(e.to_string()),
@@ -507,7 +576,7 @@ impl Daemon {
             })
         })
         .await?;
-        Ok(format!("已滑动 {desc}(经 HID)"))
+        Ok(ictl_l10n::trf!("已滑动 {desc}(经 HID)", "Swiped {desc} (via HID)"))
     }
 
     pub(crate) async fn type_text(&self, g: &mut Inner, text: &str, submit: bool) -> Result<String, String> {
@@ -518,7 +587,7 @@ impl Daemon {
             let typed = match w.keyboard_shown().await {
                 Ok(false) => {
                     return Err(
-                        "屏幕上没有键盘(没有输入框获得焦点),什么都没输;先点一下输入框,截图确认键盘出来了再输入".into(),
+                        ictl_l10n::tr!("屏幕上没有键盘(没有输入框获得焦点),什么都没输;先点一下输入框,截图确认键盘出来了再输入", "No keyboard on screen (no text field has focus), nothing typed; tap a text field first and check with a screenshot that the keyboard is up").into(),
                     );
                 }
                 Ok(true) if text.is_empty() => Ok(()),
@@ -531,18 +600,31 @@ impl Daemon {
                     // 输完读回输入框核对，少了结尾几个字就补上；对不上就不按回车
                     let note = match verify_typed(w, text).await {
                         Typed::Ok | Typed::Unknown => String::new(),
-                        Typed::Fixed(k) => format!("(第一次有 {k} 个字没输进去,已补上)"),
+                        Typed::Fixed(k) => ictl_l10n::trf!(
+                            "(第一次有 {k} 个字没输进去,已补上)",
+                            " ({k} characters were dropped the first time and typed again)"
+                        ),
                         Typed::Mismatch(now) => {
-                            return Err(format!(
+                            return Err(ictl_l10n::trf!(
                                 "输入了 {n} 个字符,但输入框里现在是「{now}」,和要输入的「{text}」对不上(App 可能吞掉了部分字符){};截图确认后再处理",
-                                if submit { ",没有按回车" } else { "" }
+                                "Typed {n} characters, but the field now contains “{now}”, which doesn't match “{text}” (the app may have swallowed some characters){}; check with a screenshot before going on",
+                                if submit { ictl_l10n::tr!(",没有按回车", ", Return not pressed") } else { "" }
                             ));
                         }
                     };
                     if submit {
-                        w.keys("\n").await.map_err(|e| format!("文字已输入{note},按回车失败:{e}"))?;
+                        w.keys("\n").await.map_err(|e| {
+                            ictl_l10n::trf!(
+                                "文字已输入{note},按回车失败:{e}",
+                                "Text typed{note}, pressing Return failed: {e}"
+                            )
+                        })?;
                     }
-                    return Ok(format!("已输入 {n} 个字符{note}{}", if submit { ",并按了回车" } else { "" }));
+                    return Ok(ictl_l10n::trf!(
+                        "已输入 {n} 个字符{note}{}",
+                        "Typed {n} characters{note}{}",
+                        if submit { ictl_l10n::tr!(",并按了回车", " and pressed Return") } else { "" }
+                    ));
                 }
                 Err(WdaError::Unavailable(_)) => {}
                 Err(e) => return Err(e.to_string()),
@@ -551,14 +633,20 @@ impl Daemon {
         let payload = if submit { format!("{text}\n") } else { text.to_owned() };
         // 先检查，一个都不输；不打开 HID 会话
         if let Some(c) = payload.chars().find(|c| ascii_to_usage(*c).is_none()) {
-            return Err(format!("WDA 不可用,HID 只能输入美式键盘上的英文和符号,不能输入 {c:?}"));
+            return Err(ictl_l10n::trf!(
+                "WDA 不可用,HID 只能输入美式键盘上的英文和符号,不能输入 {c:?}",
+                "WDA unavailable; HID can only type English letters and symbols of a US keyboard, not {c:?}"
+            ));
         }
         self.hid_do(g, move |h| Box::pin(async move { h.type_ascii(&payload).await })).await?;
-        Ok(format!("已输入 {n} 个字符(经 HID)"))
+        Ok(ictl_l10n::trf!("已输入 {n} 个字符(经 HID)", "Typed {n} characters (via HID)"))
     }
 
     pub(crate) async fn press_button(&self, g: &mut Inner, button: &str) -> Result<String, String> {
-        let hid_button = Button::parse(button).ok_or("button 只能是 home / volume_up / volume_down / lock")?;
+        let hid_button = Button::parse(button).ok_or(ictl_l10n::tr!(
+            "button 只能是 home / volume_up / volume_down / lock",
+            "button must be home / volume_up / volume_down / lock"
+        ))?;
         let wda_name = match hid_button {
             Button::Lock => return self.lock_screen(g).await,
             Button::Home => "home",
@@ -572,12 +660,16 @@ impl Daemon {
             if hid_button == Button::Home
                 && let Ok(Some(text)) = w.alert_text().await
             {
-                return Ok(format!("{},按 Home 不会生效,没有按;{TAP_ALERT}", blocking(&text)));
+                return Ok(ictl_l10n::trf!(
+                    "{},按 Home 不会生效,没有按;{TAP_ALERT}",
+                    "{}, pressing Home would have no effect, not pressed; {TAP_ALERT_EN}",
+                    blocking(&text)
+                ));
             }
             let r = if hid_button == Button::Home {
                 press_home(w).await
             } else {
-                w.press_button(wda_name).await.map(|()| format!("已按 {button}"))
+                w.press_button(wda_name).await.map(|()| ictl_l10n::trf!("已按 {button}", "Pressed {button}"))
             };
             match r {
                 Ok(text) => return Ok(text),
@@ -586,7 +678,7 @@ impl Daemon {
             }
         }
         self.hid_do(g, |h| Box::pin(h.press(hid_button))).await?;
-        Ok(format!("已按 {button}"))
+        Ok(ictl_l10n::trf!("已按 {button}", "Pressed {button}"))
     }
 
     async fn lock_screen(&self, g: &mut Inner) -> Result<String, String> {
@@ -597,26 +689,26 @@ impl Daemon {
                 match w.lock().await {
                     Ok(()) => true,
                     Err(e) => {
-                        tracing::info!("WDA 锁屏报错：{e}");
+                        tracing::info!("{}", ictl_l10n::trf!("WDA 锁屏报错：{e}", "WDA lock returned an error: {e}"));
                         w.wda_reports_locked().await.unwrap_or(false)
                     }
                 }
             };
             if locked {
                 g.last_lock = Some(Instant::now());
-                return Ok("已锁屏".into());
+                return Ok(ictl_l10n::tr!("已锁屏", "Locked").into());
             }
         }
         self.hid_do(g, |h| Box::pin(h.press(Button::Lock))).await?;
         g.last_lock = Some(Instant::now());
-        Ok("已锁屏".into())
+        Ok(ictl_l10n::tr!("已锁屏", "Locked").into())
     }
 
     pub(crate) async fn list_apps(&self, g: &mut Inner, include_system: bool) -> Result<Vec<AppInfo>, String> {
         if let Some(a) = g.apps.get(&include_system) {
             return Ok(a.clone());
         }
-        let device = g.device.clone().ok_or("手机未连接")?;
+        let device = g.device.clone().ok_or(ictl_l10n::tr!("手机未连接", "Phone not connected"))?;
         let a = device.list_apps(include_system).await.map_err(|e| e.to_string())?;
         g.apps.insert(include_system, a.clone());
         Ok(a)
@@ -631,9 +723,12 @@ impl Daemon {
         }
         // 守护进程启动后新装的 App 不在缓存里：刷新一次再找
         g.apps.clear();
-        self.resolve_cached(g, app)
-            .await?
-            .ok_or_else(|| format!("找不到名为 \"{app}\" 的 App,用 iphone_list_apps 查看"))
+        self.resolve_cached(g, app).await?.ok_or_else(|| {
+            ictl_l10n::trf!(
+                "找不到名为 \"{app}\" 的 App,用 iphone_list_apps 查看",
+                "No app named \"{app}\"; see iphone_list_apps"
+            )
+        })
     }
 
     async fn resolve_cached(&self, g: &mut Inner, app: &str) -> Result<Option<String>, String> {
@@ -651,11 +746,18 @@ impl Daemon {
         self.ensure_unlocked(g).await?;
         let w = self.require_wda(g)?;
         Ok(match w.launch_app(&bid).await.map_err(|e| e.to_string())? {
-            Launch::Foreground => format!("已启动 {bid}"),
+            Launch::Foreground => ictl_l10n::trf!("已启动 {bid}", "Launched {bid}"),
             Launch::Blocked(text) => {
-                format!("已启动 {bid},但{};{TAP_ALERT}", blocking(&text))
+                ictl_l10n::trf!(
+                    "已启动 {bid},但{};{TAP_ALERT}",
+                    "Launched {bid}, but {}; {TAP_ALERT_EN}",
+                    blocking(&text)
+                )
             }
-            Launch::Slow => format!("已启动 {bid},但 8 秒内没到前台(可能启动慢),先截图确认"),
+            Launch::Slow => ictl_l10n::trf!(
+                "已启动 {bid},但 8 秒内没到前台(可能启动慢),先截图确认",
+                "Launched {bid}, but it didn't come to the foreground within 8 s (maybe slow to start); check with a screenshot"
+            ),
         })
     }
 
@@ -663,18 +765,25 @@ impl Daemon {
         let bid = self.resolve_app(g, app).await?;
         self.ensure_unlocked(g).await?;
         self.require_wda(g)?.terminate_app(&bid).await.map_err(|e| e.to_string())?;
-        Ok(format!("已结束 {bid}"))
+        Ok(ictl_l10n::trf!("已结束 {bid}", "Terminated {bid}"))
     }
 
     pub(crate) async fn open_url(&self, g: &mut Inner, url: &str) -> Result<String, String> {
         self.ensure_unlocked(g).await?;
         let (r, app) = self.require_wda(g)?.open_url(url).await.map_err(|e| e.to_string())?;
         Ok(match r {
-            Launch::Foreground => format!("已打开 {url}(前台 {app})"),
+            Launch::Foreground => ictl_l10n::trf!("已打开 {url}(前台 {app})", "Opened {url} (foreground {app})"),
             Launch::Blocked(text) => {
-                format!("已打开 {url},但{};{TAP_ALERT}", blocking(&text))
+                ictl_l10n::trf!(
+                    "已打开 {url},但{};{TAP_ALERT}",
+                    "Opened {url}, but {}; {TAP_ALERT_EN}",
+                    blocking(&text)
+                )
             }
-            Launch::Slow => format!("已打开 {url},但 8 秒内没有 App 到前台(前台还是 {app}),先截图确认"),
+            Launch::Slow => ictl_l10n::trf!(
+                "已打开 {url},但 8 秒内没有 App 到前台(前台还是 {app}),先截图确认",
+                "Opened {url}, but no app came to the foreground within 8 s (still {app}); check with a screenshot"
+            ),
         })
     }
 }
@@ -686,12 +795,16 @@ const HID_ROTATION_MAX_AGE: Duration = Duration::from_secs(30);
 /// 所以后备操作期间不要翻转设备；恢复 WDA 后重新确认方向。
 pub(crate) fn hid_rotation(w: u32, h: u32, known: Option<(Duration, Rotation)>) -> Result<Rotation, String> {
     if w == 0 || h == 0 || w == h {
-        return Err("截图尺寸无效，无法核对 HID 方向，没有发送触摸".into());
+        return Err(ictl_l10n::tr!(
+            "截图尺寸无效，无法核对 HID 方向，没有发送触摸",
+            "Invalid screenshot size, can't check the HID orientation, no touch sent"
+        )
+        .into());
     }
     let recent = known.filter(|(age, _)| *age <= HID_ROTATION_MAX_AGE).map(|(_, r)| r);
     if w > h {
         return recent.filter(|r| r.is_landscape()).ok_or_else(|| {
-            "当前为横屏，但没有近期且匹配的 WDA 旋转角，没有发送 HID 触摸；等 WDA 恢复后重试，或转回竖屏".into()
+            ictl_l10n::tr!("当前为横屏，但没有近期且匹配的 WDA 旋转角，没有发送 HID 触摸；等 WDA 恢复后重试，或转回竖屏", "The screen is landscape but there is no recent matching WDA rotation, no HID touch sent; retry once WDA is back, or rotate to portrait").into()
         });
     }
     Ok(if recent == Some(Rotation::UpsideDown) { Rotation::UpsideDown } else { Rotation::Portrait })
@@ -708,7 +821,13 @@ async fn press_home(w: &mut WdaClient<DeviceTransport>) -> Result<String, WdaErr
             Ok(()) => {}
             Err(e @ WdaError::Unavailable(_)) => return Err(e),
             Err(e) if via_hid => {
-                tracing::info!("经 IOHID 按 Home 报错,改用 XCTest：{e}");
+                tracing::info!(
+                    "{}",
+                    ictl_l10n::trf!(
+                        "经 IOHID 按 Home 报错,改用 XCTest：{e}",
+                        "Pressing Home via IOHID failed, using XCTest: {e}"
+                    )
+                );
                 continue;
             }
             Err(e) => return Err(e),
@@ -717,7 +836,7 @@ async fn press_home(w: &mut WdaClient<DeviceTransport>) -> Result<String, WdaErr
         loop {
             app = w.active_app().await.unwrap_or_default();
             if app == SPRINGBOARD {
-                return Ok("已按 home".into());
+                return Ok(ictl_l10n::tr!("已按 home", "Pressed home").into());
             }
             if Instant::now() >= deadline {
                 break;
@@ -725,17 +844,29 @@ async fn press_home(w: &mut WdaClient<DeviceTransport>) -> Result<String, WdaErr
             tokio::time::sleep(Duration::from_millis(150)).await;
         }
         if via_hid {
-            tracing::info!("经 IOHID 按 Home 后前台还是 {app},改用 XCTest 再按一次");
+            tracing::info!(
+                "{}",
+                ictl_l10n::trf!(
+                    "经 IOHID 按 Home 后前台还是 {app},改用 XCTest 再按一次",
+                    "After pressing Home via IOHID the foreground is still {app}, pressing again via XCTest"
+                )
+            );
         }
     }
-    Ok(format!("已按 home,但前台还是 {app},先截图看看"))
+    Ok(ictl_l10n::trf!(
+        "已按 home,但前台还是 {app},先截图看看",
+        "Pressed home, but the foreground is still {app}; take a screenshot"
+    ))
 }
 
 /// 经 IOHID 按电源键锁屏，等 WDA 报锁屏，最多 [`LOCK_WAIT`]。锁上了返回 true。
 /// WDA 的 `/wda/lock` 在 iOS 27 以下用 XCTest 的 `pressLockButton`，iPhone 12 mini（iOS 26.4.1）上锁不了屏
 async fn lock_by_power_hid(w: &mut WdaClient<DeviceTransport>) -> bool {
     if let Err(e) = w.press_power_hid().await {
-        tracing::info!("经 IOHID 按电源键报错：{e}");
+        tracing::info!(
+            "{}",
+            ictl_l10n::trf!("经 IOHID 按电源键报错：{e}", "Pressing the power key via IOHID failed: {e}")
+        );
         return false;
     }
     let deadline = Instant::now() + LOCK_WAIT;
@@ -744,7 +875,14 @@ async fn lock_by_power_hid(w: &mut WdaClient<DeviceTransport>) -> bool {
             return true;
         }
         if Instant::now() >= deadline {
-            tracing::info!("经 IOHID 按电源键后 {} 秒还没锁屏,改用 WDA 的锁屏", LOCK_WAIT.as_secs());
+            tracing::info!(
+                "{}",
+                ictl_l10n::trf!(
+                    "经 IOHID 按电源键后 {} 秒还没锁屏,改用 WDA 的锁屏",
+                    "Still not locked {} s after pressing the power key via IOHID, using WDA's lock",
+                    LOCK_WAIT.as_secs()
+                )
+            );
             return false;
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -782,7 +920,11 @@ async fn wait_scrolled(w: &mut WdaClient<DeviceTransport>, vertical: bool) -> St
     .await;
     w.end_polling().await;
     match r {
-        Ok(false) => format!("({:.1} 秒后列表还在动,可能还在滚动)", SCROLL_SETTLE.as_secs_f64()),
+        Ok(false) => ictl_l10n::trf!(
+            "({:.1} 秒后列表还在动,可能还在滚动)",
+            " (the list was still moving after {:.1} s, it may still be scrolling)",
+            SCROLL_SETTLE.as_secs_f64()
+        ),
         _ => String::new(),
     }
 }
@@ -803,12 +945,17 @@ async fn poll_stable(
     let msg = loop {
         if t0.elapsed() >= max {
             break if prev.loading {
-                format!(
+                ictl_l10n::trf!(
                     "{:.1} 秒内页面一直在加载(有加载圈),按最后的状态返回;要等结果出来用 iphone_wait_for",
+                    "The page kept loading for {:.1} s (spinner shown), returning the last state; to wait for the result use iphone_wait_for",
                     max.as_secs_f64()
                 )
             } else {
-                format!("{:.1} 秒内界面一直在变(可能有动画),按最后的状态返回", max.as_secs_f64())
+                ictl_l10n::trf!(
+                    "{:.1} 秒内界面一直在变(可能有动画),按最后的状态返回",
+                    "The screen kept changing for {:.1} s (perhaps an animation), returning the last state",
+                    max.as_secs_f64()
+                )
             };
         }
         // 一次读树本身约 0.2 秒，两次之间不用再多等
@@ -817,7 +964,7 @@ async fn poll_stable(
         let same = cur.close_to(&prev, STILL_TOLERANCE);
         prev = cur;
         if same && !prev.loading {
-            break format!("界面已稳定({:.1} 秒)", t0.elapsed().as_secs_f64());
+            break ictl_l10n::trf!("界面已稳定({:.1} 秒)", "Screen settled ({:.1} s)", t0.elapsed().as_secs_f64());
         }
     };
     Ok((first, Some((msg, prev))))
@@ -825,28 +972,42 @@ async fn poll_stable(
 
 /// 判断画面动没动用的缩略图。解码是 CPU 活，放到阻塞线程
 async fn thumbnail(png: Vec<u8>) -> Result<Vec<u8>, String> {
-    tokio::task::spawn_blocking(move || imaging::thumbnail(&png)).await.map_err(|e| format!("图像处理任务异常：{e}"))?
+    tokio::task::spawn_blocking(move || imaging::thumbnail(&png))
+        .await
+        .map_err(|e| ictl_l10n::trf!("图像处理任务异常：{e}", "Image processing task failed: {e}"))?
 }
 
 /// 列元素一个都没列出来时的说明。带 filter 没匹配上时要说清楚，不然 agent 会以为屏幕上什么都没有
 fn no_elements_text(filter: &str, total: usize) -> String {
     if filter.is_empty() || total == 0 {
         // 与 toolkit 的返回文字一致
-        "没有找到带文字的元素".into()
+        ictl_l10n::tr!("没有找到带文字的元素", "No elements with text found").into()
     } else {
-        format!("没有找到包含 \"{filter}\" 的元素(屏幕上另有 {total} 个带文字的元素,不带 filter 可全部列出)")
+        ictl_l10n::trf!(
+            "没有找到包含 \"{filter}\" 的元素(屏幕上另有 {total} 个带文字的元素,不带 filter 可全部列出)",
+            "No element containing \"{filter}\" ({total} other elements with text on screen; leave out filter to list them all)"
+        )
     }
 }
 
 fn alert_msg(text: &str) -> String {
-    format!("\n注意:{},点击、滑动都会落在弹窗上;{TAP_ALERT}", blocking(text))
+    ictl_l10n::trf!(
+        "\n注意:{},点击、滑动都会落在弹窗上;{TAP_ALERT}",
+        "\nNote: {}, taps and swipes land on the alert; {TAP_ALERT_EN}",
+        blocking(text)
+    )
 }
 
 const TAP_ALERT: &str = "先用 iphone_tap_element 点弹窗上的按钮";
+const TAP_ALERT_EN: &str = "first tap a button on the alert with iphone_tap_element";
+
+fn needs_wda() -> &'static str {
+    if ictl_l10n::is_en() { NEEDS_WDA_EN } else { NEEDS_WDA }
+}
 
 /// 「屏幕上有系统弹窗「…」挡着」：MCP 端靠固定的开头认出结果里已经报过弹窗
 fn blocking(text: &str) -> String {
-    format!("{ALERT_BLOCKING}「{text}」挡着")
+    ictl_l10n::trf!("{ALERT_BLOCKING}「{text}」挡着", "{ALERT_BLOCKING_EN}: “{text}”")
 }
 
 /// 树里有弹窗就返回提醒
@@ -854,7 +1015,10 @@ fn alert_note(tree: &Tree) -> String {
     match tree.alert() {
         Some(a) => {
             let title = [&a.label, &a.name].into_iter().find(|s| !s.is_empty()).cloned().unwrap_or_default();
-            format!("\n注意:屏幕上有弹窗「{title}」,先点弹窗上的按钮(见元素列表或截图)")
+            ictl_l10n::trf!(
+                "\n注意:屏幕上有弹窗「{title}」,先点弹窗上的按钮(见元素列表或截图)",
+                "\nNote: an alert “{title}” is on screen; tap a button on it first (see the element list or the screenshot)"
+            )
         }
         None => String::new(),
     }
